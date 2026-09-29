@@ -1,0 +1,27 @@
+name: RRS CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test-analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libncurses-dev libgtest-dev cppcheck
+
+      - name: Configure
+        run: cmake -S RRS/04_IMPLEMENTATION_TESTING/source-code -B build
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Run cppcheck
+        run: cppcheck --enable=warning,style,performance,portability --error-exitcode=1 --inline-suppr RRS/04_IMPLEMENTATION_TESTING/source-code/src RRS/04_IMPLEMENTATION_TESTING/source-code/include
