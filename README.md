@@ -15,7 +15,7 @@ A C/C++ Railway Reservation System featuring an interactive ncurses TUI, graph-b
 
 ## Architecture & Technology Stack
 
-*   **Core Engine:** C/C++.
+*   **Core Engine:** C/C++
 *   **User Interface:** Text User Interface (TUI) built with the ncurses library (with an optional decoupled MERN/API wrapper).
 *   **Persistence:** File storage or a lightweight embedded database.
 *   **Version Control & Agile Planning:** Git, GitHub, and GitHub Projects / Jira.
