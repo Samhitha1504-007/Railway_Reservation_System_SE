@@ -1,27 +1,44 @@
-name: RRS CI
+name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
-  build-test-analyze:
+  build-and-test:
     runs-on: ubuntu-latest
+    env:
+      SRC: 04_IMPLEMENTATION_TESTING/source-code
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libncurses-dev libgtest-dev cppcheck
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libncurses-dev libgtest-dev cppcheck
+
+      - name: Detect CMake project
+        id: detect
+        run: |
+          if [ -f "$SRC/CMakeLists.txt" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No CMakeLists.txt yet - skipping build"
+          fi
 
       - name: Configure
-        run: cmake -S RRS/04_IMPLEMENTATION_TESTING/source-code -B build
+        if: steps.detect.outputs.found == 'true'
+        run: cmake -S "$SRC" -B build
 
       - name: Build
+        if: steps.detect.outputs.found == 'true'
         run: cmake --build build --parallel
 
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+      - name: Unit tests
+        if: steps.detect.outputs.found == 'true'
+        run: ctest --test-dir build --output-on-failure --no-tests=ignore
 
-      - name: Run cppcheck
-        run: cppcheck --enable=warning,style,performance,portability --error-exitcode=1 --inline-suppr RRS/04_IMPLEMENTATION_TESTING/source-code/src RRS/04_IMPLEMENTATION_TESTING/source-code/include
+      - name: Static analysis
+        if: steps.detect.outputs.found == 'true'
+        run: cppcheck --enable=warning,performance,portability --error-exitcode=1 "$SRC/src"

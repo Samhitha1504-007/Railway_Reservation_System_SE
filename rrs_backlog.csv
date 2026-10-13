@@ -1,0 +1,44 @@
+title,description,labels,sprint,assignee,points
+"FR-001 Passenger registration","As a passenger, I want to register with a unique email so that I can access the system. Acceptance: unique email + password complexity enforced.",module:auth;priority:High,Sprint 1,ridhima-jain45,3
+"FR-002 Reject duplicate registration","As the system, I want to reject registration with an already-used email so duplicate accounts cannot be created.",module:auth;priority:High,Sprint 1,ridhima-jain45,2
+"FR-003 Login and session with role","As a user, I want to log in and get a role-tagged session so my access is scoped correctly.",module:auth;priority:High,Sprint 1,ridhima-jain45,3
+"FR-004 RBAC enforcement","As the system, I want to reject Passenger sessions calling Admin-only functions so privileged actions stay protected.",module:auth;priority:High,Sprint 1,ridhima-jain45,5
+"FR-005 View/update profile","As a passenger, I want to view and update my profile so my details stay current.",module:auth;priority:Medium,Sprint 1,ridhima-jain45,2
+"FR-006 Session timeout/logout","As the system, I want to terminate idle or logged-out sessions so stale sessions can't be reused.",module:auth;priority:Medium,Sprint 1,ridhima-jain45,2
+"SEC-001 Password hashing","As the system, I want to store only salted password hashes so credentials stay confidential.",module:auth;priority:High,Sprint 1,ridhima-jain45,2
+"SEC-002 Admin authorization test","As QA, I want an automated test proving Passenger sessions can't call Admin endpoints.",module:auth;priority:High,Sprint 1,ridhima-jain45,2
+"FR-007 Admin create train","As an admin, I want to create a train with route and capacities so it becomes bookable.",module:inventory;priority:High,Sprint 1,RealAdhi,5
+"FR-008 Admin edit train","As an admin, I want to edit a train's route, halts, timings or capacities so schedules stay accurate.",module:inventory;priority:High,Sprint 1,RealAdhi,3
+"FR-009 Admin retire train","As an admin, I want to retire a train so it can no longer be booked while history is preserved.",module:inventory;priority:Medium,Sprint 1,RealAdhi,2
+"FR-010 Validate route graph connectivity","As the system, I want to validate that a train's halts form a connected path before saving so search never hits a broken route.",module:inventory;priority:High,Sprint 1,RealAdhi,5
+"FR-011 Capacity reduction guard","As the system, I want to reject a capacity update below the confirmed-booking count so existing passengers are never bumped.",module:inventory;priority:High,Sprint 1,RealAdhi,3
+"FR-012 Direct route search","As a passenger, I want to search direct trains between two stations so I can see what's available.",module:search;priority:High,Sprint 1,Samhitha1504-007,5
+"FR-013 Connected multi-leg search","As a passenger, I want multi-leg journey options when no direct train exists so I still find a way to travel.",module:search;priority:High,Sprint 1,Samhitha1504-007,8
+"Infra: CI pipeline setup","As the team, we want a GitHub Actions workflow building and testing every push/PR so regressions are caught early.",module:infra;priority:High,Sprint 1,,3
+"Infra: CMake build skeleton","As the team, we want a CMake build producing rrs_app and a test binary so everyone builds the same way.",module:infra;priority:High,Sprint 1,,3
+"FR-014 Dynamic fare calculation","As a passenger, I want fares computed from distance, class and concessions so pricing is accurate.",module:search;priority:High,Sprint 2,Samhitha1504-007,5
+"FR-015 Eco-routing score","As a passenger, I want an eco-score per route so I can compare environmental impact.",module:search;priority:Medium,Sprint 2,Samhitha1504-007,5
+"FR-016 Sort/filter results","As a passenger, I want to sort/filter results by fare, time or eco-score so I can pick what matters to me.",module:search;priority:High,Sprint 2,Samhitha1504-007,3
+"NFR-001 Search response time","As the system, I want 95% of searches to return within 2s on a 200-station/500-train network so the TUI feels responsive.",module:search;priority:High,Sprint 2,Samhitha1504-007,3
+"FR-018 Create booking and PNR","As a passenger, I want a PNR generated after successful mock payment so my seat is confirmed.",module:booking;priority:High,Sprint 2,saathviksp,5
+"FR-019 No booking on payment failure","As the system, I want to reject booking creation when mock payment fails so no false confirmations occur.",module:booking;priority:High,Sprint 2,saathviksp,3
+"FR-020 Waitlist enqueue","As the system, I want to enqueue overflow bookings on the waitlist in FCFS order when a class is full.",module:booking;priority:High,Sprint 2,saathviksp,5
+"FR-021 Cancel ticket","As a passenger, I want to cancel a confirmed or waitlisted ticket so I can free my seat or exit the queue.",module:booking;priority:High,Sprint 2,saathviksp,3
+"FR-022 Waitlist auto-promotion","As the system, I want to auto-promote the head of the waitlist to CONFIRMED when a seat frees up.",module:booking;priority:High,Sprint 2,saathviksp,5
+"FR-023 Booking status display","As a passenger, I want to see my booking as WAITLISTED, CONFIRMED or CANCELLED so I know where I stand.",module:booking;priority:Medium,Sprint 2,saathviksp,2
+"FR-024 Prevent duplicate booking on retry","As the system, I want to prevent a second confirmed booking when a passenger retries after a payment timeout.",module:booking;priority:High,Sprint 2,saathviksp,5
+"NFR-002 Booking confirmation time","As the system, I want booking confirmation to complete within 1s under normal load.",module:booking;priority:Medium,Sprint 2,saathviksp,2
+"NFR-009 No double-booking under concurrency","As the system, I want exactly one confirmed booking when 50 concurrent requests target the last seat.",module:booking;priority:High,Sprint 2,saathviksp,5
+"SEC-003 Input validation","As the system, I want all user-supplied fields sanitized before processing so malformed input can't crash or corrupt state.",module:infra;priority:High,Sprint 2,,3
+"SEC-004 Session expiry enforcement","As the system, I want expired/invalid tokens rejected on every protected call.",module:auth;priority:High,Sprint 2,ridhima-jain45,2
+"SEC-005 No payment data persisted","As the system, I want mock payment to store only a success/fail flag, never card-like details.",module:booking;priority:High,Sprint 2,saathviksp,2
+"SEC-006 Audit logging","As the system, I want failed logins and admin actions logged so activity is auditable.",module:auth;priority:Medium,Sprint 2,ridhima-jain45,3
+"Integration: end-to-end TUI demo","As the team, we want a working end-to-end TUI flow (search to booking to cancel) ready for the Sprint 2 demo video.",module:infra;priority:High,Sprint 2,,5
+"Security validation pass","As QA, we want SEC-001 to SEC-006 executed and recorded before the freeze.",module:infra;priority:High,Sprint 2,,3
+"FR-017 Search within time limit","As a passenger, I want search results within the NFR-001 limit on a bounded network so the TUI stays responsive.",module:search;priority:High,Sprint 2,Samhitha1504-007,2
+"NFR-003 Availability","As the system, I want 99% availability during the evaluation window so demos are not interrupted.",module:infra;priority:Medium,Sprint 2,RealAdhi,2
+"NFR-004 Usability: 6-screen booking flow","As a new passenger, I want to go from search to booking in no more than 6 TUI screens so the flow is simple.",module:infra;priority:Medium,Sprint 2,ridhima-jain45,3
+"NFR-005 Reliability: no duplicate on retry","As QA, I want a test proving a payment-timeout retry never creates a second booking.",module:booking;priority:High,Sprint 2,RealAdhi,2
+"NFR-006 Maintainability: modular code with unit tests","As the team, we want search, fare, booking and RBAC in separate modules with automated unit tests.",module:infra;priority:Medium,Sprint 1,RealAdhi,2
+"NFR-007 Testability: core runs without TUI","As a developer, I want core functions callable without ncurses or a live payment service so CI runs headless.",module:infra;priority:High,Sprint 1,ridhima-jain45,2
+"NFR-008 Scalability: 500 trains, 10,000 bookings","As the system, I want the route graph and waitlist to handle 500 trains and 10,000 bookings without redesign.",module:search;priority:Medium,Sprint 2,Samhitha1504-007,3
