@@ -224,3 +224,107 @@ TEST_F(LoginTest, SelfRegistrationNeverProducesAnAdmin) {
     ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
     EXPECT_NE(RRS_ROLE_ADMIN, s.role);
 }
+
+/* ---------- FR-004: RBAC enforcement (+ SEC-002 admin authorization test) ---------- */
+
+/* Stand-ins for protected functions owned by other modules. Replace with the
+ * real train_create() / booking_create() once those modules land. */
+static rrs_status_t train_create_stub(const rrs_session_t* s) {
+    rrs_status_t st = auth_authorize(s, RRS_ROLE_ADMIN);
+    return st;                       /* real function would continue here */
+}
+static rrs_status_t booking_create_stub(const rrs_session_t* s) {
+    return auth_authorize(s, RRS_ROLE_PASSENGER);
+}
+
+class RbacTest : public ::testing::Test {
+protected:
+    rrs_session_t passenger, admin;
+    void SetUp() override {
+        auth_reset_for_tests();
+        ASSERT_EQ(RRS_OK, auth_register("rider@example.com", "Passw0rdOK", "Rider"));
+        ASSERT_EQ(RRS_OK, auth_create_user_for_tests("admin@example.com", "Adm1nPassw0rd",
+                                                      "Admin", RRS_ROLE_ADMIN));
+        ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &passenger));
+        ASSERT_EQ(RRS_OK, auth_login("admin@example.com", "Adm1nPassw0rd", &admin));
+    }
+    void TearDown() override { rrs::session_set_fixed_time_for_tests(0); }
+};
+
+TEST_F(RbacTest, AdminSessionMayCallAdminFunction) {
+    EXPECT_EQ(RRS_OK, train_create_stub(&admin));
+}
+
+TEST_F(RbacTest, PassengerSessionIsForbiddenFromAdminFunction) {   /* SEC-002 / ST-01 */
+    EXPECT_EQ(ERR_FORBIDDEN, train_create_stub(&passenger));
+}
+
+TEST_F(RbacTest, PassengerSessionMayCallPassengerFunction) {
+    EXPECT_EQ(RRS_OK, booking_create_stub(&passenger));
+}
+
+TEST_F(RbacTest, AdminSessionDoesNotSatisfyPassengerOnlyCheck) {   /* exact role match */
+    EXPECT_EQ(ERR_FORBIDDEN, booking_create_stub(&admin));
+}
+
+TEST_F(RbacTest, NullSessionIsRejected) {
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(nullptr, RRS_ROLE_ADMIN));
+}
+
+TEST_F(RbacTest, MadeUpTokenIsRejected) {
+    rrs_session_t fake = passenger;
+    std::memset(fake.token, 'a', RRS_TOKEN_LEN - 1);
+    fake.token[RRS_TOKEN_LEN - 1] = '\0';
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&fake, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(RbacTest, EmptyTokenIsRejected) {
+    rrs_session_t empty;
+    std::memset(&empty, 0, sizeof empty);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&empty, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(RbacTest, TokenWithoutTerminatorIsRejected) {
+    rrs_session_t bad = passenger;
+    std::memset(bad.token, 'a', RRS_TOKEN_LEN);          /* no NUL anywhere */
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&bad, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(RbacTest, EditingTheRoleFieldDoesNotEscalatePrivileges) {
+    rrs_session_t forged = passenger;
+    forged.role = RRS_ROLE_ADMIN;                         /* attacker edits their copy */
+    EXPECT_EQ(ERR_FORBIDDEN, train_create_stub(&forged));
+}
+
+TEST_F(RbacTest, EditingTheUserIdFieldInvalidatesTheSession) {
+    rrs_session_t forged = passenger;
+    std::strncpy(forged.user_id, admin.user_id, RRS_USER_ID_LEN - 1);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&forged, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(RbacTest, SessionIsValidJustBeforeExpiryAndExpiredAtExpiry) {
+    const time_t t0 = 1000000;
+    rrs::session_set_fixed_time_for_tests(t0);
+    rrs_session_t s;
+    ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
+
+    rrs::session_set_fixed_time_for_tests(t0 + rrs::kSessionTtlSeconds - 1);
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+
+    rrs::session_set_fixed_time_for_tests(t0 + rrs::kSessionTtlSeconds);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(RbacTest, ExpiredSessionIsReportedAsExpiredNotForbidden) {
+    const time_t t0 = 2000000;
+    rrs::session_set_fixed_time_for_tests(t0);
+    rrs_session_t s;
+    ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
+    rrs::session_set_fixed_time_for_tests(t0 + rrs::kSessionTtlSeconds + 5);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, train_create_stub(&s));   /* would be FORBIDDEN if live */
+}
+
+TEST_F(RbacTest, SessionsDoNotSurviveAStoreReset) {
+    auth_reset_for_tests();
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&passenger, RRS_ROLE_PASSENGER));
+}
