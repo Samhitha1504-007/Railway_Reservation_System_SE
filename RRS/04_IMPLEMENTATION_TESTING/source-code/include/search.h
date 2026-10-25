@@ -21,14 +21,16 @@ extern "C" {
 #define RRS_MAX_HALTS        64   /* stations on one train's route     */
 #define RRS_MAX_LEGS         3    /* trains in one journey             */
 #define RRS_MAX_ROUTES       20   /* options returned by one search    */
+#define RRS_MAX_HALT_MINUTES (7 * 24 * 60)   /* latest halt time: a week of running */
+#define RRS_MAX_DISTANCE_KM  10000           /* longest train route                */
 
 /* ---- network loading (called by the inventory module) ---- */
 
 /* One stop on a train's route. */
 typedef struct {
     char station[RRS_STATION_CODE_LEN];
-    int  arrive_min;    /* = depart_min at the first halt          */
-    int  depart_min;    /* = arrive_min at the last halt           */
+    int  arrive_min;    /* must equal depart_min at the first halt */
+    int  depart_min;    /* must equal arrive_min at the last halt  */
     int  distance_km;   /* from the train's first halt (0 there)   */
 } rrs_halt_t;
 
@@ -36,7 +38,8 @@ typedef struct {
  *   RRS_OK              train added
  *   ERR_INVALID_INPUT   bad id or station code, fewer than 2 or more than
  *                       RRS_MAX_HALTS halts, a station repeated, times going
- *                       backwards, or distance not increasing
+ *                       backwards or above RRS_MAX_HALT_MINUTES, distance not
+ *                       increasing or above RRS_MAX_DISTANCE_KM
  *   ERR_DUPLICATE       a train with this id is already loaded            */
 rrs_status_t search_graph_add_train(const char* train_id, const rrs_halt_t* halts, int halt_count);
 
@@ -79,7 +82,8 @@ rrs_search_opts_t search_default_opts(void);
 
 /* FR-012 / FR-013: find journeys from `src` to `dst` on `date` (YYYY-MM-DD).
  * Returns every direct train, plus connected journeys when there is no direct
- * train or when a connection arrives sooner than the fastest direct train.
+ * train or when a connection has a shorter total travel time than the fastest
+ * direct train. A journey never uses the same train twice.
  * Results are ranked by total travel time, then fewer changes, then earlier
  * departure. `opts` may be NULL for the defaults.
  *   RRS_OK              `out` holds 1..max_results routes

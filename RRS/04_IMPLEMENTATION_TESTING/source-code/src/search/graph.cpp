@@ -58,10 +58,14 @@ extern "C" rrs_status_t search_graph_add_train(const char* train_id, const rrs_h
         if (!rrs::is_valid_station_code(out.station)) return ERR_INVALID_INPUT;
         if (!seen.insert(out.station).second) return ERR_INVALID_INPUT;   /* repeated station */
         if (out.arrive_min < 0 || out.depart_min < out.arrive_min) return ERR_INVALID_INPUT;
+        if (out.depart_min > RRS_MAX_HALT_MINUTES || out.distance_km > RRS_MAX_DISTANCE_KM)
+            return ERR_INVALID_INPUT;
 
         if (i == 0) {
             if (out.distance_km != 0 || out.depart_min >= 24 * 60) return ERR_INVALID_INPUT;
+            if (out.arrive_min != out.depart_min) return ERR_INVALID_INPUT;
         } else {
+            if (i == halt_count - 1 && out.depart_min != out.arrive_min) return ERR_INVALID_INPUT;
             const rrs::Halt& prev = t.halts.back();
             if (out.arrive_min < prev.depart_min) return ERR_INVALID_INPUT;
             if (out.distance_km <= prev.distance_km) return ERR_INVALID_INPUT;
