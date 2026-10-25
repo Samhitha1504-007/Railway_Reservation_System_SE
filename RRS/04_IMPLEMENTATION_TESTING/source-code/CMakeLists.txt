@@ -17,6 +17,8 @@ file(GLOB_RECURSE RRS_SOURCES CONFIGURE_DEPENDS
 add_library(rrs_auth STATIC
     src/auth/auth.cpp
     src/auth/password.cpp
+    src/auth/session.cpp
+    src/auth/rbac.cpp
 )
 target_include_directories(rrs_auth
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"

@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "common_types.h"
+
 namespace rrs {
 
 /* Email: <=100 chars, no spaces, one '@', non-empty local part,
@@ -27,5 +29,8 @@ std::string normalize_email(const std::string& email);
 /* ---- test hooks ---- */
 void auth_reset_for_tests(void);                                  /* clear all users */
 bool auth_get_stored_hash_for_tests(const char* email, std::string& hash_out);
+/* Create a user with any role (admins cannot self-register). */
+rrs_status_t auth_create_user_for_tests(const char* email, const char* password,
+                                        const char* name, rrs_role_t role);
 
 #endif

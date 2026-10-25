@@ -19,6 +19,25 @@ extern "C" {
  *   ERR_IO               hashing/storage failure                        */
 rrs_status_t auth_register(const char* email, const char* password, const char* name);
 
+/* FR-003: log in and receive a session tagged with the user's role.
+ *   RRS_OK               `out` holds a new session
+ *   ERR_AUTH_FAILED      unknown email OR wrong password (deliberately the
+ *                        same result, so callers cannot probe which emails exist)
+ *   ERR_INVALID_INPUT    a null pointer was passed
+ *   ERR_IO               secure random generation failed
+ * On any failure `out` is zeroed.                                           */
+rrs_status_t auth_login(const char* email, const char* password, rrs_session_t* out);
+
+/* FR-004: role-based access check. Call this at the start of every protected
+ * function (the facade does it for you).
+ *   RRS_OK                session is live and its role equals `required_role`
+ *   ERR_SESSION_EXPIRED   null session, unknown/forged token, or expired
+ *   ERR_FORBIDDEN         session is live but its role is not `required_role`
+ * The role and user id are checked against the server-side record, never against
+ * the fields in the caller's copy, so editing them does not escalate privileges.
+ * Roles are matched exactly: an admin session does not satisfy a passenger check. */
+rrs_status_t auth_authorize(const rrs_session_t* session, rrs_role_t required_role);
+
 #ifdef __cplusplus
 }
 #endif
