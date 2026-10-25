@@ -41,4 +41,4 @@ jobs:
 
       - name: Static analysis
         if: steps.detect.outputs.found == 'true'
-        run: cppcheck --enable=warning,performance,portability --error-exitcode=1 "$SRC/src"
+        run: cppcheck --enable=warning,performance,portability --error-exitcode=1 --inline-suppr --suppress=missingIncludeSystem --quiet -I "$SRC/include" "$SRC/src"
