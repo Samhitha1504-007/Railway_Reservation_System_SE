@@ -10,7 +10,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     env:
-      SRC: 04_IMPLEMENTATION_TESTING/source-code
+      SRC: RRS/04_IMPLEMENTATION_TESTING/source-code
     steps:
       - uses: actions/checkout@v4
 
