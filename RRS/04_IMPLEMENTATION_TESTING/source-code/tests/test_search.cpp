@@ -64,6 +64,27 @@ TEST_F(SearchTest, InvalidTrainsAreRejected) {
     EXPECT_EQ(ERR_INVALID_INPUT, add("T1", {halt("A", 1440, 1440, 0), halt("B", 1500, 1500, 50)}));
 }
 
+TEST_F(SearchTest, TimesAndDistancesHaveUpperBounds) {
+    EXPECT_EQ(RRS_OK, add("T1", {halt("A", 0, 0, 0),
+                                 halt("B", RRS_MAX_HALT_MINUTES, RRS_MAX_HALT_MINUTES, RRS_MAX_DISTANCE_KM)}));
+    EXPECT_EQ(ERR_INVALID_INPUT, add("T2", {halt("A", 0, 0, 0),
+                                            halt("B", RRS_MAX_HALT_MINUTES + 1, RRS_MAX_HALT_MINUTES + 1, 50)}));
+    EXPECT_EQ(ERR_INVALID_INPUT, add("T3", {halt("A", 0, 0, 0),
+                                            halt("B", 60, 60, RRS_MAX_DISTANCE_KM + 1)}));
+}
+
+TEST_F(SearchTest, HugeTimeCannotOverflowTheSearch) {   /* was signed overflow under UBSan */
+    EXPECT_EQ(ERR_INVALID_INPUT, add("T1", {halt("A", 0, 0, 0), halt("B", 2147483000, 2147483000, 10)}));
+    ASSERT_EQ(RRS_OK, add("T2", {halt("B", 600, 600, 0), halt("C", 700, 700, 10)}));
+    EXPECT_EQ(ERR_INVALID_INPUT, search_routes("A", "C", kDate, nullptr, &out));   /* A never loaded */
+}
+
+TEST_F(SearchTest, FirstAndLastHaltMustNotDwell) {
+    EXPECT_EQ(ERR_INVALID_INPUT, add("T1", {halt("A", 0, 10, 0), halt("B", 60, 60, 50)}));
+    EXPECT_EQ(ERR_INVALID_INPUT, add("T2", {halt("A", 0, 0, 0), halt("B", 60, 70, 50)}));
+    EXPECT_EQ(RRS_OK, add("T3", {halt("A", 0, 0, 0), halt("B", 60, 70, 50), halt("C", 120, 120, 90)}));
+}
+
 TEST_F(SearchTest, StationCodeWithoutTerminatorIsRejected) {
     rrs_halt_t a = halt("A", 0, 0, 0);
     std::memset(a.station, 'A', RRS_STATION_CODE_LEN);   /* no NUL */
@@ -283,4 +304,30 @@ TEST_F(SearchTest, SameTrainsConnectingAtTwoStationsAreListedOnce) {
     ASSERT_EQ(RRS_OK, search_routes("A", "C", kDate, nullptr, &out));
     ASSERT_EQ(1, out.count);
     EXPECT_STREQ("X", out.routes[0].legs[0].to);   /* change at X: 30 min wait beats next-day at B */
+}
+
+TEST_F(ConnectionTest, ChangeAtExactlyTheMinimumTransferTimeIsAllowed) {
+    rrs_search_opts_t o = search_default_opts();
+    o.min_transfer_minutes = 60;   /* T1 arrives B 10:00, T2 leaves 11:00 */
+    ASSERT_EQ(RRS_OK, search_routes("A", "C", kDate, &o, &out));
+    ASSERT_EQ(1, out.count);
+    EXPECT_EQ(hm(11, 0), out.routes[0].legs[1].depart_min);
+
+    o.min_transfer_minutes = 61;   /* one minute short: next day's T2 */
+    ASSERT_EQ(RRS_OK, search_routes("A", "C", kDate, &o, &out));
+    ASSERT_EQ(1, out.count);
+    EXPECT_EQ(hm(11, 0) + 24 * 60, out.routes[0].legs[1].depart_min);
+}
+
+TEST_F(SearchTest, JourneyNeverUsesTheSameTrainTwice) {
+    /* T1 runs C -> D -> A -> B, so it has no A -> D service. The only way to D
+     * would be T1 (A->B), T2 (B->C), then T1 again (C->D, next day's run). */
+    ASSERT_EQ(RRS_OK, add("T1", {halt("C", hm(6, 0), hm(6, 0), 0),
+                                 halt("D", hm(7, 0), hm(7, 0), 50),
+                                 halt("A", hm(8, 0), hm(8, 0), 100),
+                                 halt("B", hm(9, 0), hm(9, 0), 150)}));
+    ASSERT_EQ(RRS_OK, add("T2", {halt("B", hm(10, 0), hm(10, 0), 0), halt("C", hm(11, 0), hm(11, 0), 80)}));
+    rrs_search_opts_t o = search_default_opts();
+    o.max_legs = 3;
+    EXPECT_EQ(ERR_NO_ROUTE, search_routes("A", "D", kDate, &o, &out));
 }
