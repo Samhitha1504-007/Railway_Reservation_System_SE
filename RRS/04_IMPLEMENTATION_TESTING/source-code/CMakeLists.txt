@@ -26,19 +26,28 @@ target_include_directories(rrs_auth
 )
 target_link_libraries(rrs_auth PUBLIC OpenSSL::Crypto)
 
+# Search module (C++17). Public header: include/search.h
+add_library(rrs_search STATIC
+    src/search/graph.cpp
+    src/search/search.cpp
+)
+target_include_directories(rrs_search
+    PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/search"
+)
+
 add_executable(rrs_app ${RRS_SOURCES})
 target_include_directories(rrs_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     ${CURSES_INCLUDE_DIRS}
 )
-target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_auth)
+target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_auth rrs_search)
 
 enable_testing()
 find_package(GTest REQUIRED)
 
 add_executable(rrs_tests
     tests/test_inventory.c
-    tests/test_search.c
     tests/test_booking.c
 )
 target_include_directories(rrs_tests PRIVATE
@@ -54,3 +63,7 @@ target_include_directories(rrs_auth_tests PRIVATE
 )
 target_link_libraries(rrs_auth_tests PRIVATE rrs_auth GTest::gtest_main)
 add_test(NAME rrs_auth_tests COMMAND rrs_auth_tests)
+
+add_executable(rrs_search_tests tests/test_search.cpp)
+target_link_libraries(rrs_search_tests PRIVATE rrs_search GTest::gtest_main)
+add_test(NAME rrs_search_tests COMMAND rrs_search_tests)
