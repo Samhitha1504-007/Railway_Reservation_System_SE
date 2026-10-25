@@ -1,11 +1,13 @@
 #include "auth.h"
 #include "auth_internal.h"
 #include "password.h"
+#include "session.h"
 
 #include <openssl/rand.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -87,7 +89,10 @@ bool is_valid_name(const std::string& name) {
 
 }  // namespace rrs
 
-extern "C" rrs_status_t auth_register(const char* email, const char* password, const char* name) {
+namespace {
+
+rrs_status_t create_user(const char* email, const char* password, const char* name,
+                         rrs_role_t role) {
     if (!email || !password || !name) return ERR_INVALID_INPUT;
 
     std::string e(email), p(password), n(name);
@@ -100,7 +105,7 @@ extern "C" rrs_status_t auth_register(const char* email, const char* password, c
     UserRecord rec;
     rec.email = key;
     rec.name = n;
-    rec.role = RRS_ROLE_PASSENGER;   /* self-registration is always a passenger */
+    rec.role = role;
     if (!generate_user_id(rec.user_id)) return ERR_IO;
     if (!rrs::password_hash(p, rec.password_hash)) return ERR_IO;
 
@@ -108,7 +113,47 @@ extern "C" rrs_status_t auth_register(const char* email, const char* password, c
     return RRS_OK;
 }
 
-void auth_reset_for_tests(void) { g_users.clear(); }
+}  // namespace
+
+extern "C" rrs_status_t auth_register(const char* email, const char* password, const char* name) {
+    /* self-registration is always a passenger */
+    return create_user(email, password, name, RRS_ROLE_PASSENGER);
+}
+
+extern "C" rrs_status_t auth_login(const char* email, const char* password, rrs_session_t* out) {
+    if (!out) return ERR_INVALID_INPUT;
+    std::memset(out, 0, sizeof *out);
+    if (!email || !password) return ERR_INVALID_INPUT;
+
+    const UserRecord* u = find_user(rrs::normalize_email(email));
+
+    if (!u) {
+        /* Unknown email: still do a hash check against a dummy so the response
+         * time does not reveal whether the email exists. */
+        static std::string dummy;
+        if (dummy.empty()) rrs::password_hash("Dummy-Password-1", dummy);
+        rrs::password_verify(password, dummy);
+        return ERR_AUTH_FAILED;
+    }
+
+    if (!rrs::password_verify(password, u->password_hash)) return ERR_AUTH_FAILED;
+
+    if (!rrs::session_create(u->user_id, u->role, *out)) {
+        std::memset(out, 0, sizeof *out);
+        return ERR_IO;
+    }
+    return RRS_OK;
+}
+
+void auth_reset_for_tests(void) {
+    g_users.clear();
+    rrs::session_clear();
+}
+
+rrs_status_t auth_create_user_for_tests(const char* email, const char* password,
+                                        const char* name, rrs_role_t role) {
+    return create_user(email, password, name, role);
+}
 
 bool auth_get_stored_hash_for_tests(const char* email, std::string& hash_out) {
     const UserRecord* u = find_user(rrs::normalize_email(email));
