@@ -2,16 +2,25 @@
  * search.cpp - direct (FR-012) and connected multi-leg (FR-013) route search.
  * Depth-limited search over the route graph: from each station, ride any
  * train to a later halt, then change trains there if more legs are allowed.
+ *
+ * Pruning keeps 3-leg searches fast on a 500-train network:
+ *  - only change at a station that can still reach the destination with the
+ *    trains left (reverse breadth-first search from the destination);
+ *  - drop a connection once it is already slower than the fastest direct train;
+ *  - drop a partial journey once it is already slower than the max_results-th
+ *    best journey found so far (it can only get slower).
  */
 #include "search.h"
 #include "graph.h"
 
 #include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <cstring>
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -31,25 +40,97 @@ struct Candidate {
     int total_minutes() const { return legs.back().arrive - legs.front().depart; }
 };
 
+bool ranks_before(const Candidate& a, const Candidate& b) {
+    if (a.total_minutes() != b.total_minutes()) return a.total_minutes() < b.total_minutes();
+    if (a.legs.size() != b.legs.size()) return a.legs.size() < b.legs.size();
+    return a.legs.front().depart < b.legs.front().depart;
+}
+
+/* Fewest trains needed to reach `dst` from each station, up to `max_trains`.
+ * Stations not in the map need more than that. */
+std::unordered_map<std::string, int> trains_to_reach(const std::string& dst, int max_trains) {
+    const std::vector<rrs::Train>& trains = rrs::graph_trains();
+    std::unordered_map<std::string, int> dist;
+    dist[dst] = 0;
+    for (int level = 1; level <= max_trains; ++level) {
+        std::vector<std::string> added;
+        for (const rrs::Train& t : trains) {
+            /* walking the route backwards: is any later halt at level - 1? */
+            bool reaches = false;
+            for (size_t h = t.halts.size(); h-- > 0;) {
+                const std::string& st = t.halts[h].station;
+                auto it = dist.find(st);
+                if (reaches && it == dist.end()) added.push_back(st);
+                if (it != dist.end() && it->second == level - 1) reaches = true;
+            }
+        }
+        if (added.empty()) break;
+        for (const std::string& st : added) dist.emplace(st, level);
+    }
+    return dist;
+}
+
 struct Search {
     std::string dst;
     int max_legs;
+    int max_results;
     int min_transfer;
-    std::set<std::string> visited;   /* stations on the current path */
+    int fastest_direct;                            /* INT_MAX if none */
+    std::unordered_map<std::string, int> dist;     /* trains still needed */
+    std::set<std::string> visited;                 /* stations on the current path */
     std::vector<LegRef> path;
-    std::vector<Candidate> found;
 
-    void from(const std::string& station, int ready_at, size_t prev_train, bool first);
+    /* best journey per train sequence (the same trains can connect at several
+     * stations), plus their totals for the max_results-th best bound */
+    std::map<std::vector<size_t>, Candidate> best;
+    std::multiset<int> totals;
+
+    void record(const Candidate& c);
+    int bound() const;
+    bool uses_train(size_t train) const;
+    void from(const std::string& station, int ready_at, bool first);
 };
 
+void Search::record(const Candidate& c) {
+    std::vector<size_t> key;
+    for (const LegRef& l : c.legs) key.push_back(l.train);
+    auto it = best.find(key);
+    if (it != best.end()) {
+        if (!ranks_before(c, it->second)) return;
+        totals.erase(totals.find(it->second.total_minutes()));
+        it->second = c;
+    } else {
+        best.emplace(key, c);
+    }
+    totals.insert(c.total_minutes());
+}
+
+/* A journey slower than this cannot make the results. */
+int Search::bound() const {
+    int b = fastest_direct;
+    if (static_cast<int>(totals.size()) >= max_results) {
+        auto it = totals.begin();
+        std::advance(it, max_results - 1);
+        b = std::min(b, *it);
+    }
+    return b;
+}
+
+bool Search::uses_train(size_t train) const {
+    for (const LegRef& l : path)
+        if (l.train == train) return true;
+    return false;
+}
+
 /* `ready_at` is when we arrived at `station` (ignored for the first leg). */
-void Search::from(const std::string& station, int ready_at, size_t prev_train, bool first) {
+void Search::from(const std::string& station, int ready_at, bool first) {
     const std::vector<rrs::StopRef>* stops = rrs::graph_stops_at(station);
     if (!stops) return;
     const std::vector<rrs::Train>& trains = rrs::graph_trains();
+    int legs_after = static_cast<int>(path.size()) + 1;   /* legs once we board */
 
     for (const rrs::StopRef& stop : *stops) {
-        if (!first && stop.train == prev_train) continue;   /* same train is not a change */
+        if (uses_train(stop.train)) continue;
         const rrs::Train& t = trains[stop.train];
         const rrs::Halt& board = t.halts[stop.halt];
 
@@ -63,23 +144,29 @@ void Search::from(const std::string& station, int ready_at, size_t prev_train, b
             while (wait < min_transfer) wait += kMinutesPerDay;
             depart = ready_at + wait;
         }
+        int start = first ? depart : path.front().depart;
 
         for (size_t h = stop.halt + 1; h < t.halts.size(); ++h) {
             const rrs::Halt& alight = t.halts[h];
-            if (visited.count(alight.station)) continue;
             int arrive = depart + (alight.arrive_min - board.depart_min);
-            path.push_back(LegRef{stop.train, stop.halt, h, depart, arrive});
+            if (arrive - start > bound()) break;   /* only gets slower */
+            if (visited.count(alight.station)) continue;
 
             if (alight.station == dst) {
-                found.push_back(Candidate{path});
+                path.push_back(LegRef{stop.train, stop.halt, h, depart, arrive});
+                Candidate c{path};
                 path.pop_back();
+                if (c.legs.size() == 1 || c.total_minutes() < fastest_direct) record(c);
                 break;   /* no point riding past the destination */
             }
-            if (static_cast<int>(path.size()) < max_legs) {
-                visited.insert(alight.station);
-                from(alight.station, arrive, stop.train, false);
-                visited.erase(alight.station);
-            }
+
+            auto d = dist.find(alight.station);
+            if (d == dist.end() || legs_after + d->second > max_legs) continue;
+
+            path.push_back(LegRef{stop.train, stop.halt, h, depart, arrive});
+            visited.insert(alight.station);
+            from(alight.station, arrive, false);
+            visited.erase(alight.station);
             path.pop_back();
         }
     }
@@ -98,12 +185,6 @@ bool is_valid_date(const char* s) {
     if (y < 1 || m < 1 || m > 12 || d < 1) return false;
     int max_day = days[m - 1] + (m == 2 && is_leap(y) ? 1 : 0);
     return d <= max_day;
-}
-
-bool ranks_before(const Candidate& a, const Candidate& b) {
-    if (a.total_minutes() != b.total_minutes()) return a.total_minutes() < b.total_minutes();
-    if (a.legs.size() != b.legs.size()) return a.legs.size() < b.legs.size();
-    return a.legs.front().depart < b.legs.front().depart;
 }
 
 void copy_code(char* dst, size_t cap, const std::string& src) {
@@ -157,34 +238,27 @@ extern "C" rrs_status_t search_routes(const char* src, const char* dst, const ch
 
     Search s;
     s.dst = to;
-    s.max_legs = o.max_legs;
+    s.max_legs = 1;
+    s.max_results = o.max_results;
     s.min_transfer = o.min_transfer_minutes;
+    s.fastest_direct = INT_MAX;
+    s.dist[to] = 0;
     s.visited.insert(from);
-    s.from(from, 0, 0, true);
-    if (s.found.empty()) return ERR_NO_ROUTE;
 
-    /* The same trains can connect at several stations: keep the fastest. */
-    std::map<std::vector<size_t>, Candidate> best;
-    for (const Candidate& c : s.found) {
-        std::vector<size_t> key;
-        for (const LegRef& l : c.legs) key.push_back(l.train);
-        auto it = best.find(key);
-        if (it == best.end() || ranks_before(c, it->second)) best[key] = c;
+    /* direct trains first, so connections can be pruned against the fastest */
+    s.from(from, 0, true);
+    for (const auto& kv : s.best)
+        s.fastest_direct = std::min(s.fastest_direct, kv.second.total_minutes());
+
+    if (o.max_legs > 1) {
+        s.max_legs = o.max_legs;
+        s.dist = trains_to_reach(to, o.max_legs - 1);
+        s.from(from, 0, true);
     }
-
-    /* FR-013: connections only when no direct train, or when they arrive sooner. */
-    int fastest_direct = -1;
-    for (const auto& kv : best)
-        if (kv.second.legs.size() == 1 &&
-            (fastest_direct < 0 || kv.second.total_minutes() < fastest_direct))
-            fastest_direct = kv.second.total_minutes();
+    if (s.best.empty()) return ERR_NO_ROUTE;
 
     std::vector<Candidate> ranked;
-    for (const auto& kv : best) {
-        const Candidate& c = kv.second;
-        if (c.legs.size() == 1 || fastest_direct < 0 || c.total_minutes() < fastest_direct)
-            ranked.push_back(c);
-    }
+    for (const auto& kv : s.best) ranked.push_back(kv.second);
     std::stable_sort(ranked.begin(), ranked.end(), ranks_before);
 
     int n = std::min(static_cast<int>(ranked.size()), o.max_results);
