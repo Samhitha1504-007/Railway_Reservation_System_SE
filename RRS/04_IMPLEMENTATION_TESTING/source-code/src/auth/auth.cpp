@@ -145,6 +145,10 @@ extern "C" rrs_status_t auth_login(const char* email, const char* password, rrs_
     return RRS_OK;
 }
 
+extern "C" rrs_status_t auth_logout(const rrs_session_t* session) {
+    return rrs::session_destroy(session) ? RRS_OK : ERR_SESSION_EXPIRED;
+}
+
 void auth_reset_for_tests(void) {
     g_users.clear();
     rrs::session_clear();

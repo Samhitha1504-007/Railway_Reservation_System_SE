@@ -38,6 +38,13 @@ rrs_status_t auth_login(const char* email, const char* password, rrs_session_t* 
  * Roles are matched exactly: an admin session does not satisfy a passenger check. */
 rrs_status_t auth_authorize(const rrs_session_t* session, rrs_role_t required_role);
 
+/* FR-006: end a session (logout). The token stops working immediately.
+ *   RRS_OK                the session was live and has been removed
+ *   ERR_SESSION_EXPIRED   null, unknown, tampered, already logged out, or idle-expired
+ * Sessions also end by themselves after 15 minutes without a successful call
+ * (see kSessionTtlSeconds in session.h). */
+rrs_status_t auth_logout(const rrs_session_t* session);
+
 #ifdef __cplusplus
 }
 #endif

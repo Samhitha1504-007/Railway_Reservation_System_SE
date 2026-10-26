@@ -14,7 +14,7 @@ struct StoredSession {
     std::string token;
     std::string user_id;
     rrs_role_t  role;
-    time_t      expiry;
+    time_t      expiry;     /* idle deadline; pushed forward by every successful call */
 };
 
 std::vector<StoredSession> g_sessions;
@@ -32,6 +32,36 @@ bool random_token(std::string& out) {
         out.push_back(hex[c & 0x0F]);
     }
     return true;
+}
+
+/* Find the live session that matches the caller's copy.
+ * Returns its index, or -1 with `status` saying why. Sessions found to be idle
+ * for too long are removed here. */
+int locate(const rrs_session_t* s, SessionStatus& status) {
+    status = SessionStatus::Invalid;
+    if (!s) return -1;
+    /* both strings must be NUL-terminated inside their buffers before we read them */
+    if (!std::memchr(s->token, '\0', RRS_TOKEN_LEN)) return -1;
+    if (!std::memchr(s->user_id, '\0', RRS_USER_ID_LEN)) return -1;
+
+    const size_t want = RRS_TOKEN_LEN - 1;
+    if (std::strlen(s->token) != want) return -1;
+
+    for (size_t i = 0; i < g_sessions.size(); ++i) {
+        const StoredSession& st = g_sessions[i];
+        /* constant-time compare of the two equal-length tokens */
+        if (st.token.size() != want || CRYPTO_memcmp(st.token.data(), s->token, want) != 0)
+            continue;
+        if (st.user_id != s->user_id) return -1;            /* tampered copy */
+        if (now() >= st.expiry) {
+            g_sessions.erase(g_sessions.begin() + static_cast<long>(i));
+            status = SessionStatus::Expired;
+            return -1;
+        }
+        status = SessionStatus::Valid;
+        return static_cast<int>(i);
+    }
+    return -1;
 }
 
 }  // namespace
@@ -53,22 +83,25 @@ bool session_create(const std::string& user_id, rrs_role_t role, rrs_session_t& 
     return true;
 }
 
-SessionStatus session_validate(const char* token, SessionInfo& info) {
-    if (!token) return SessionStatus::Invalid;
-    const size_t want = RRS_TOKEN_LEN - 1;
-    if (std::strlen(token) != want) return SessionStatus::Invalid;
+SessionStatus session_authenticate(const rrs_session_t* session, SessionInfo& info) {
+    SessionStatus status;
+    int i = locate(session, status);
+    if (i < 0) return status;
 
-    for (const auto& s : g_sessions) {
-        /* constant-time compare of the two equal-length tokens */
-        if (s.token.size() == want && CRYPTO_memcmp(s.token.data(), token, want) == 0) {
-            if (now() >= s.expiry) return SessionStatus::Expired;
-            info.user_id = s.user_id;
-            info.role = s.role;
-            info.expiry = s.expiry;
-            return SessionStatus::Valid;
-        }
-    }
-    return SessionStatus::Invalid;
+    StoredSession& st = g_sessions[static_cast<size_t>(i)];
+    st.expiry = now() + kSessionTtlSeconds;               /* activity restarts the idle timer */
+    info.user_id = st.user_id;
+    info.role = st.role;
+    info.expiry = st.expiry;
+    return SessionStatus::Valid;
+}
+
+bool session_destroy(const rrs_session_t* session) {
+    SessionStatus status;
+    int i = locate(session, status);
+    if (i < 0) return false;
+    g_sessions.erase(g_sessions.begin() + i);
+    return true;
 }
 
 size_t session_count() { return g_sessions.size(); }
