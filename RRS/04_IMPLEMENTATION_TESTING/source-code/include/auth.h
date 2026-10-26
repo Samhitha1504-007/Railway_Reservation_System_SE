@@ -38,6 +38,33 @@ rrs_status_t auth_login(const char* email, const char* password, rrs_session_t* 
  * Roles are matched exactly: an admin session does not satisfy a passenger check. */
 rrs_status_t auth_authorize(const rrs_session_t* session, rrs_role_t required_role);
 
+/* FR-005: a user's own profile. Role and password are not part of it. */
+typedef struct {
+    char       user_id[RRS_USER_ID_LEN];
+    char       email[101];     /* stored lower-case */
+    char       name[101];
+    rrs_role_t role;
+} rrs_profile_t;
+
+/* View the profile of the logged-in user (always their own, taken from the
+ * server-side session, never from an id the caller supplies).
+ *   RRS_OK                `out` filled in
+ *   ERR_SESSION_EXPIRED   null, forged, tampered or idle-expired session
+ *   ERR_NOT_FOUND         the account no longer exists
+ *   ERR_INVALID_INPUT     `out` is null
+ * On any failure `out` is zeroed. Any live session may view its own profile. */
+rrs_status_t auth_profile_get(const rrs_session_t* session, rrs_profile_t* out);
+
+/* Update the logged-in user's own name and/or email. Pass NULL to leave a
+ * field unchanged. All changes are validated first and applied together, or
+ * not at all.
+ *   RRS_OK                updated
+ *   ERR_INVALID_INPUT     both NULL, or a bad name/email
+ *   ERR_DUPLICATE         the new email belongs to another account
+ *   ERR_SESSION_EXPIRED / ERR_NOT_FOUND   as for auth_profile_get          */
+rrs_status_t auth_profile_update(const rrs_session_t* session, const char* new_name,
+                                 const char* new_email);
+
 /* FR-006: end a session (logout). The token stops working immediately.
  *   RRS_OK                the session was live and has been removed
  *   ERR_SESSION_EXPIRED   null, unknown, tampered, already logged out, or idle-expired
