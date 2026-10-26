@@ -302,15 +302,20 @@ TEST_F(RbacTest, EditingTheUserIdFieldInvalidatesTheSession) {
     EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&forged, RRS_ROLE_PASSENGER));
 }
 
-TEST_F(RbacTest, SessionIsValidJustBeforeExpiryAndExpiredAtExpiry) {
+TEST_F(RbacTest, SessionIsValidJustBeforeTheIdleTimeout) {
     const time_t t0 = 1000000;
     rrs::session_set_fixed_time_for_tests(t0);
     rrs_session_t s;
     ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
-
     rrs::session_set_fixed_time_for_tests(t0 + rrs::kSessionTtlSeconds - 1);
     EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
 
+TEST_F(RbacTest, SessionIsExpiredAtTheIdleTimeout) {
+    const time_t t0 = 1000000;
+    rrs::session_set_fixed_time_for_tests(t0);
+    rrs_session_t s;
+    ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
     rrs::session_set_fixed_time_for_tests(t0 + rrs::kSessionTtlSeconds);
     EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
 }
@@ -327,4 +332,90 @@ TEST_F(RbacTest, ExpiredSessionIsReportedAsExpiredNotForbidden) {
 TEST_F(RbacTest, SessionsDoNotSurviveAStoreReset) {
     auth_reset_for_tests();
     EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&passenger, RRS_ROLE_PASSENGER));
+}
+
+/* ---------- FR-006: logout and idle timeout ---------- */
+
+class SessionLifecycleTest : public ::testing::Test {
+protected:
+    rrs_session_t s;
+    const time_t t0 = 5000000;
+
+    void SetUp() override {
+        auth_reset_for_tests();
+        ASSERT_EQ(RRS_OK, auth_register("rider@example.com", "Passw0rdOK", "Rider"));
+        rrs::session_set_fixed_time_for_tests(t0);
+        ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
+    }
+    void TearDown() override { rrs::session_set_fixed_time_for_tests(0); }
+    void now_is(time_t t) { rrs::session_set_fixed_time_for_tests(t); }
+};
+
+TEST_F(SessionLifecycleTest, LogoutEndsTheSession) {
+    EXPECT_EQ(RRS_OK, auth_logout(&s));
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    EXPECT_EQ(0u, rrs::session_count());
+}
+
+TEST_F(SessionLifecycleTest, LoggingOutTwiceFailsTheSecondTime) {
+    ASSERT_EQ(RRS_OK, auth_logout(&s));
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&s));
+}
+
+TEST_F(SessionLifecycleTest, LogoutWithNullSessionIsRejected) {
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(nullptr));
+    EXPECT_EQ(1u, rrs::session_count());
+}
+
+TEST_F(SessionLifecycleTest, LogoutOnlyEndsThatSession) {
+    rrs_session_t other;
+    ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &other));
+    ASSERT_EQ(RRS_OK, auth_logout(&s));
+    EXPECT_EQ(RRS_OK, auth_authorize(&other, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, LogoutWithEditedUserIdIsRejectedAndSessionSurvives) {
+    rrs_session_t forged = s;
+    std::strncpy(forged.user_id, "not-the-real-user-id", RRS_USER_ID_LEN - 1);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&forged));
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, LogoutWithMadeUpTokenIsRejectedAndSessionSurvives) {
+    rrs_session_t fake = s;
+    std::memset(fake.token, 'a', RRS_TOKEN_LEN - 1);
+    fake.token[RRS_TOKEN_LEN - 1] = '\0';
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&fake));
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, LogoutAfterTheIdleTimeoutIsRejected) {
+    now_is(t0 + rrs::kSessionTtlSeconds);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&s));
+}
+
+TEST_F(SessionLifecycleTest, ExpiredSessionIsRemovedFromTheStore) {
+    now_is(t0 + rrs::kSessionTtlSeconds);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    EXPECT_EQ(0u, rrs::session_count());
+}
+
+TEST_F(SessionLifecycleTest, ActivityRestartsTheIdleTimer) {
+    const int ttl = rrs::kSessionTtlSeconds;
+    now_is(t0 + ttl - 1);                                  /* just before the first deadline */
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    now_is(t0 + 2 * ttl - 2);                              /* past the ORIGINAL deadline */
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    now_is(t0 + 3 * ttl - 2);                              /* a full idle period after the last call */
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, RejectedCallsDoNotRestartTheIdleTimer) {
+    rrs_session_t fake = s;
+    std::memset(fake.token, 'b', RRS_TOKEN_LEN - 1);
+    fake.token[RRS_TOKEN_LEN - 1] = '\0';
+    now_is(t0 + rrs::kSessionTtlSeconds - 1);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&fake, RRS_ROLE_PASSENGER));   /* not the real session */
+    now_is(t0 + rrs::kSessionTtlSeconds);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
 }
