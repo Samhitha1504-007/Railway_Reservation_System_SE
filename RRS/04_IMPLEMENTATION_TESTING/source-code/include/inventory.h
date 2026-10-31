@@ -1,6 +1,125 @@
 #ifndef RRS_INVENTORY_H
 #define RRS_INVENTORY_H
 
-/* Owner: Adhithya */
+/*
+ * Public API of the Inventory & Schedule module (owner: Adhithya).
+ * Admin-only management of trains, routes, halts and per-class capacities.
+ * Signatures follow Design doc section 4.3 (train_create / update / retire).
+ */
+
+#include "common_types.h"
+#include "search.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Travel classes (SRS Appendix A). */
+typedef enum {
+    RRS_CLASS_SLEEPER = 0,
+    RRS_CLASS_AC3     = 1,     /* AC 3-Tier */
+    RRS_CLASS_AC2     = 2,     /* AC 2-Tier */
+    RRS_CLASS_COUNT   = 3
+} rrs_class_t;
+
+#define RRS_MAX_CLASS_CAPACITY 10000   /* seats in one class of one train */
+
+/* FR-010: check that an ordered list of halts forms a connected path that the
+ * route-search graph can use. Pure check: needs no session and changes nothing.
+ * Rules (the same ones search_graph_add_train enforces):
+ *   - 2..RRS_MAX_HALTS halts
+ *   - each station code is 1-5 upper-case letters/digits and appears once
+ *   - the first halt is at 0 km, departs before 24:00 and has arrive == depart
+ *   - the last halt has arrive == depart
+ *   - at every halt arrive <= depart, and it arrives no earlier than the
+ *     previous halt departed
+ *   - distance strictly increases from halt to halt
+ *   - times and distances stay within RRS_MAX_HALT_MINUTES / RRS_MAX_DISTANCE_KM
+ *   RRS_OK              route is usable
+ *   ERR_INVALID_INPUT   null pointer or any rule above broken            */
+rrs_status_t inventory_validate_route(const rrs_halt_t* halts, int halt_count);
+
+typedef enum {
+    RRS_TRAIN_ACTIVE  = 0,
+    RRS_TRAIN_RETIRED = 1
+} rrs_train_status_t;
+
+/* A train as the admin defines it (SRS Appendix B.2). The scheduled departure
+ * is the first halt's depart_min. */
+typedef struct {
+    char               train_id[RRS_TRAIN_ID_LEN];   /* 1-10 letters/digits    */
+    int                halt_count;
+    rrs_halt_t         halts[RRS_MAX_HALTS];         /* first halt_count used  */
+    int                capacity[RRS_CLASS_COUNT];    /* seats per class, 0..RRS_MAX_CLASS_CAPACITY;
+                                                        0 = class not offered; at least one > 0 */
+    rrs_train_status_t status;                       /* ignored on input       */
+} rrs_train_t;
+
+/* The inventory module owns the route graph used by search: every ACTIVE train
+ * is loaded into it, so callers must not call search_graph_add_train directly.
+ * Trains are kept in memory (persistence is added by the store module). */
+
+/* FR-011 hook, implemented by the booking module: how many CONFIRMED bookings
+ * a train's class holds right now (waitlisted and cancelled ones do not count). */
+typedef int (*rrs_confirmed_count_fn)(const char* train_id, rrs_class_t cls);
+
+/* Install the booking module's counter. Until one is installed every class is
+ * treated as having no confirmed bookings. Pass NULL to remove it. */
+void inventory_set_booking_counter(rrs_confirmed_count_fn counter);
+
+/* FR-007: create a train. Admin only.
+ *   RRS_OK                  train stored as ACTIVE and added to the route graph
+ *   ERR_SESSION_EXPIRED     null, forged or expired session
+ *   ERR_FORBIDDEN           session is not an admin session
+ *   ERR_INVALID_INPUT       null train, bad train id, invalid route (see
+ *                           inventory_validate_route) or bad capacities
+ *   ERR_DUPLICATE           the id is already used, even by a retired train
+ * On any failure nothing is stored.                                         */
+rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train);
+
+/* FR-008: replace the route, halts, timings and capacities of an existing
+ * train (train->train_id picks which one). Admin only. The new definition is
+ * checked completely first and applied as a whole, or not at all; search sees
+ * the new schedule immediately.
+ *   RRS_OK                  train updated
+ *   ERR_SESSION_EXPIRED     null, forged or expired session
+ *   ERR_FORBIDDEN           session is not an admin session
+ *   ERR_INVALID_INPUT       null train, bad id, invalid route or bad capacities
+ *   ERR_NOT_FOUND           no train with this id
+ *   ERR_INVALID_INPUT       also: the train is retired and can no longer be edited
+ *   ERR_CAPACITY_CONFLICT   FR-011: some class's new capacity is below its number
+ *                           of confirmed bookings; nothing is changed, not even
+ *                           the other fields of the update
+ * The status field is ignored: a train's status only changes through
+ * train_retire().                                                          */
+rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train);
+
+/* FR-009: retire a train. Admin only. A retired train disappears from route
+ * search and is no longer bookable, but its record stays readable through
+ * train_get() (status RRS_TRAIN_RETIRED) so booking history keeps working.
+ * Its id can never be reused. Existing confirmed bookings are not touched.
+ * Retiring an already-retired train succeeds and changes nothing.
+ *   RRS_OK                  train is retired
+ *   ERR_SESSION_EXPIRED     null, forged or expired session
+ *   ERR_FORBIDDEN           session is not an admin session
+ *   ERR_INVALID_INPUT       null train_id
+ *   ERR_NOT_FOUND           no train with this id                          */
+rrs_status_t train_retire(const rrs_session_t* session, const char* train_id);
+
+/* For the booking module: 1 if the train exists and is ACTIVE, else 0
+ * (unknown, retired or null id). Needs no session; the facade checks those. */
+int train_is_bookable(const char* train_id);
+
+/* Read one train, retired ones included. Any live session may call it.
+ *   RRS_OK                  `out` filled in
+ *   ERR_SESSION_EXPIRED     null, forged or expired session
+ *   ERR_INVALID_INPUT       null train_id or `out`
+ *   ERR_NOT_FOUND           no train with this id
+ * On any failure `out` is zeroed.                                           */
+rrs_status_t train_get(const rrs_session_t* session, const char* train_id, rrs_train_t* out);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* RRS_INVENTORY_H */
