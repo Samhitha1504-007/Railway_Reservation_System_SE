@@ -188,6 +188,7 @@ rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train
 
     pos = find_train(train->train_id);
     if (pos < 0) return ERR_NOT_FOUND;
+    if (g_trains[pos].status != RRS_TRAIN_ACTIVE) return ERR_INVALID_INPUT;   /* retired */
 
     previous = g_trains[pos];
     store_definition(&g_trains[pos], train);
@@ -198,6 +199,37 @@ rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train
         return st;
     }
     return RRS_OK;
+}
+
+rrs_status_t train_retire(const rrs_session_t* session, const char* train_id)
+{
+    rrs_status_t st = auth_authorize(session, RRS_ROLE_ADMIN);
+    int pos;
+
+    if (st != RRS_OK) return st;
+    if (train_id == NULL) return ERR_INVALID_INPUT;
+
+    pos = find_train(train_id);
+    if (pos < 0) return ERR_NOT_FOUND;
+    if (g_trains[pos].status == RRS_TRAIN_RETIRED) return RRS_OK;
+
+    g_trains[pos].status = RRS_TRAIN_RETIRED;
+    st = rebuild_graph();
+    if (st != RRS_OK) {                      /* not expected; keep the train active */
+        g_trains[pos].status = RRS_TRAIN_ACTIVE;
+        rebuild_graph();
+        return st;
+    }
+    return RRS_OK;
+}
+
+int train_is_bookable(const char* train_id)
+{
+    int pos;
+
+    if (train_id == NULL) return 0;
+    pos = find_train(train_id);
+    return pos >= 0 && g_trains[pos].status == RRS_TRAIN_ACTIVE;
 }
 
 rrs_status_t train_get(const rrs_session_t* session, const char* train_id, rrs_train_t* out)

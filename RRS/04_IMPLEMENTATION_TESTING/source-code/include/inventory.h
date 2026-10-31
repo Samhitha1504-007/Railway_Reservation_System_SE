@@ -78,9 +78,26 @@ rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train
  *   ERR_FORBIDDEN           session is not an admin session
  *   ERR_INVALID_INPUT       null train, bad id, invalid route or bad capacities
  *   ERR_NOT_FOUND           no train with this id
+ *   ERR_INVALID_INPUT       also: the train is retired and can no longer be edited
  * The status field is ignored: a train's status only changes through
  * train_retire().                                                          */
 rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train);
+
+/* FR-009: retire a train. Admin only. A retired train disappears from route
+ * search and is no longer bookable, but its record stays readable through
+ * train_get() (status RRS_TRAIN_RETIRED) so booking history keeps working.
+ * Its id can never be reused. Existing confirmed bookings are not touched.
+ * Retiring an already-retired train succeeds and changes nothing.
+ *   RRS_OK                  train is retired
+ *   ERR_SESSION_EXPIRED     null, forged or expired session
+ *   ERR_FORBIDDEN           session is not an admin session
+ *   ERR_INVALID_INPUT       null train_id
+ *   ERR_NOT_FOUND           no train with this id                          */
+rrs_status_t train_retire(const rrs_session_t* session, const char* train_id);
+
+/* For the booking module: 1 if the train exists and is ACTIVE, else 0
+ * (unknown, retired or null id). Needs no session; the facade checks those. */
+int train_is_bookable(const char* train_id);
 
 /* Read one train, retired ones included. Any live session may call it.
  *   RRS_OK                  `out` filled in

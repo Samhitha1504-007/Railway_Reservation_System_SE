@@ -491,3 +491,98 @@ TEST_F(InventoryTest, EditCannotChangeStatus) {
     EXPECT_EQ(got.status, RRS_TRAIN_ACTIVE);
     EXPECT_TRUE(searchable("NDLS", "LKO"));
 }
+
+/* ---------- FR-009: retire train ---------- */
+
+TEST_F(InventoryTest, RetiredTrainIsNoLongerBookableOrSearchable) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    ASSERT_TRUE(train_is_bookable("12001"));
+    ASSERT_TRUE(searchable("NDLS", "LKO"));
+
+    ASSERT_EQ(train_retire(&admin, "12001"), RRS_OK);
+    EXPECT_FALSE(train_is_bookable("12001"));
+    EXPECT_FALSE(searchable("NDLS", "LKO"));
+}
+
+TEST_F(InventoryTest, RetiredTrainRecordIsPreserved) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    ASSERT_EQ(train_retire(&admin, "12001"), RRS_OK);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&passenger, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.status, RRS_TRAIN_RETIRED);
+    EXPECT_EQ(got.halt_count, 3);
+    EXPECT_STREQ(got.halts[0].station, "NDLS");
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+    EXPECT_EQ(inventory_train_count_for_tests(), 1);
+}
+
+TEST_F(InventoryTest, RetiringOneTrainLeavesOthersBookable) {
+    rrs_train_t a = make_train("12001", good_route());
+    rrs_train_t b = make_train("12002", {halt("NDLS", 500, 500, 0), halt("LKO", 900, 900, 510)});
+    ASSERT_EQ(train_create(&admin, &a), RRS_OK);
+    ASSERT_EQ(train_create(&admin, &b), RRS_OK);
+
+    ASSERT_EQ(train_retire(&admin, "12001"), RRS_OK);
+    EXPECT_FALSE(train_is_bookable("12001"));
+    EXPECT_TRUE(train_is_bookable("12002"));
+
+    rrs_route_list_t out;
+    ASSERT_EQ(search_routes("NDLS", "LKO", kTravelDate, nullptr, &out), RRS_OK);
+    ASSERT_EQ(out.count, 1);
+    EXPECT_STREQ(out.routes[0].legs[0].train_id, "12002");
+}
+
+TEST_F(InventoryTest, RetireIsRepeatableAndIdUnusable) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    EXPECT_EQ(train_retire(&admin, "12001"), RRS_OK);
+    EXPECT_EQ(train_retire(&admin, "12001"), RRS_OK);        /* already retired: no change */
+    EXPECT_EQ(train_create(&admin, &t), ERR_DUPLICATE);      /* id stays reserved */
+    EXPECT_FALSE(train_is_bookable("12001"));
+}
+
+TEST_F(InventoryTest, RetiredTrainCannotBeEdited) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    ASSERT_EQ(train_retire(&admin, "12001"), RRS_OK);
+
+    t.capacity[RRS_CLASS_SLEEPER] = 5;
+    EXPECT_EQ(train_update(&admin, &t), ERR_INVALID_INPUT);
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+    EXPECT_EQ(got.status, RRS_TRAIN_RETIRED);
+    EXPECT_FALSE(searchable("NDLS", "LKO"));
+}
+
+TEST_F(InventoryTest, PassengerCannotRetireATrain) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    EXPECT_EQ(train_retire(&passenger, "12001"), ERR_FORBIDDEN);
+    EXPECT_TRUE(train_is_bookable("12001"));
+    EXPECT_TRUE(searchable("NDLS", "LKO"));
+}
+
+TEST_F(InventoryTest, MissingOrForgedSessionCannotRetire) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    EXPECT_EQ(train_retire(nullptr, "12001"), ERR_SESSION_EXPIRED);
+
+    rrs_session_t forged = admin;
+    forged.token[0] = forged.token[0] == 'a' ? 'b' : 'a';
+    EXPECT_EQ(train_retire(&forged, "12001"), ERR_SESSION_EXPIRED);
+    EXPECT_TRUE(train_is_bookable("12001"));
+}
+
+TEST_F(InventoryTest, RetireUnknownTrainOrNullIdFails) {
+    EXPECT_EQ(train_retire(&admin, "99999"), ERR_NOT_FOUND);
+    EXPECT_EQ(train_retire(&admin, nullptr), ERR_INVALID_INPUT);
+}
+
+TEST_F(InventoryTest, UnknownOrNullTrainIsNotBookable) {
+    EXPECT_FALSE(train_is_bookable("99999"));
+    EXPECT_FALSE(train_is_bookable(nullptr));
+}
