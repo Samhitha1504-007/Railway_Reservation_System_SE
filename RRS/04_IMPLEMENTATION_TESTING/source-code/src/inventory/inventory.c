@@ -12,6 +12,7 @@
 /* Sorted by train_id so lookups are a binary search. */
 static rrs_train_t g_trains[INVENTORY_MAX_TRAINS];
 static int         g_train_count = 0;
+static rrs_confirmed_count_fn g_booking_counter = NULL;
 
 /* The code must be NUL-terminated inside its buffer before it is read. */
 static int station_code_ok(const char* code)
@@ -113,6 +114,17 @@ static rrs_status_t require_live_session(const rrs_session_t* session)
     return st;
 }
 
+/* FR-011: a class may not end up with fewer seats than confirmed bookings. */
+static int capacity_conflict(const char* train_id, const int capacity[RRS_CLASS_COUNT])
+{
+    int c;
+
+    if (g_booking_counter == NULL) return 0;
+    for (c = 0; c < RRS_CLASS_COUNT; ++c)
+        if (capacity[c] < g_booking_counter(train_id, (rrs_class_t)c)) return 1;
+    return 0;
+}
+
 /* Reload the route graph from the stored trains. Only ACTIVE trains are
  * searchable. */
 static rrs_status_t rebuild_graph(void)
@@ -141,6 +153,11 @@ static void store_definition(rrs_train_t* slot, const rrs_train_t* train)
 }
 
 /* ---- public API ---- */
+
+void inventory_set_booking_counter(rrs_confirmed_count_fn counter)
+{
+    g_booking_counter = counter;
+}
 
 rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train)
 {
@@ -189,6 +206,7 @@ rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train
     pos = find_train(train->train_id);
     if (pos < 0) return ERR_NOT_FOUND;
     if (g_trains[pos].status != RRS_TRAIN_ACTIVE) return ERR_INVALID_INPUT;   /* retired */
+    if (capacity_conflict(train->train_id, train->capacity)) return ERR_CAPACITY_CONFLICT;
 
     previous = g_trains[pos];
     store_definition(&g_trains[pos], train);
@@ -253,6 +271,7 @@ rrs_status_t train_get(const rrs_session_t* session, const char* train_id, rrs_t
 void inventory_reset_for_tests(void)
 {
     g_train_count = 0;
+    g_booking_counter = NULL;
     search_graph_clear();
 }
 
