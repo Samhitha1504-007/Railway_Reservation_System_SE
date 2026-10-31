@@ -12,6 +12,8 @@ find_package(OpenSSL REQUIRED)
 file(GLOB_RECURSE RRS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
 )
+# Modules with their own library target are linked in, not compiled twice.
+list(FILTER RRS_SOURCES EXCLUDE REGEX "/src/inventory/")
 
 # Auth module (C++17, OpenSSL for password hashing). Public header: include/auth.h
 add_library(rrs_auth STATIC
@@ -36,18 +38,26 @@ target_include_directories(rrs_search
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/search"
 )
 
+# Inventory module (C11). Public header: include/inventory.h
+add_library(rrs_inventory STATIC
+    src/inventory/inventory.c
+)
+target_include_directories(rrs_inventory
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(rrs_inventory PUBLIC rrs_search PRIVATE rrs_auth)
+
 add_executable(rrs_app ${RRS_SOURCES})
 target_include_directories(rrs_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     ${CURSES_INCLUDE_DIRS}
 )
-target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_auth rrs_search)
+target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_auth rrs_search rrs_inventory)
 
 enable_testing()
 find_package(GTest REQUIRED)
 
 add_executable(rrs_tests
-    tests/test_inventory.c
     tests/test_booking.c
 )
 target_include_directories(rrs_tests PRIVATE
@@ -56,6 +66,14 @@ target_include_directories(rrs_tests PRIVATE
 set_target_properties(rrs_tests PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(rrs_tests PRIVATE GTest::gtest_main)
 add_test(NAME rrs_tests COMMAND rrs_tests)
+
+add_executable(rrs_inventory_tests tests/test_inventory.cpp)
+target_include_directories(rrs_inventory_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
+)
+target_link_libraries(rrs_inventory_tests PRIVATE rrs_inventory rrs_auth GTest::gtest_main)
+add_test(NAME rrs_inventory_tests COMMAND rrs_inventory_tests)
 
 add_executable(rrs_auth_tests tests/test_auth.cpp)
 target_include_directories(rrs_auth_tests PRIVATE
