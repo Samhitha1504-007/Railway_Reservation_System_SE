@@ -69,6 +69,19 @@ typedef struct {
  * On any failure nothing is stored.                                         */
 rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train);
 
+/* FR-008: replace the route, halts, timings and capacities of an existing
+ * train (train->train_id picks which one). Admin only. The new definition is
+ * checked completely first and applied as a whole, or not at all; search sees
+ * the new schedule immediately.
+ *   RRS_OK                  train updated
+ *   ERR_SESSION_EXPIRED     null, forged or expired session
+ *   ERR_FORBIDDEN           session is not an admin session
+ *   ERR_INVALID_INPUT       null train, bad id, invalid route or bad capacities
+ *   ERR_NOT_FOUND           no train with this id
+ * The status field is ignored: a train's status only changes through
+ * train_retire().                                                          */
+rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train);
+
 /* Read one train, retired ones included. Any live session may call it.
  *   RRS_OK                  `out` filled in
  *   ERR_SESSION_EXPIRED     null, forged or expired session
