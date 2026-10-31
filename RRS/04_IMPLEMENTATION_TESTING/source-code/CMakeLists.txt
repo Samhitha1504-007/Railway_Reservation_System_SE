@@ -68,6 +68,10 @@ target_link_libraries(rrs_tests PRIVATE GTest::gtest_main)
 add_test(NAME rrs_tests COMMAND rrs_tests)
 
 add_executable(rrs_inventory_tests tests/test_inventory.cpp)
+target_include_directories(rrs_inventory_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
+)
 target_link_libraries(rrs_inventory_tests PRIVATE rrs_inventory rrs_auth GTest::gtest_main)
 add_test(NAME rrs_inventory_tests COMMAND rrs_inventory_tests)
 
