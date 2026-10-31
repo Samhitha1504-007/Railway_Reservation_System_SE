@@ -40,10 +40,16 @@ This repository houses the complete documentation for the Software Development L
 
 ## Getting Started
 
-*(To be populated as development progresses during Sprint 1 & 2)*
+The code lives in `RRS/04_IMPLEMENTATION_TESTING/source-code/` and is built with CMake (3.16+), the same way CI builds it.
 
 1.  Clone the repository: `git clone <repository_url>`
-2.  Navigate to the project directory.
-3.  Ensure you have `ncurses`, `make`, and a standard C/C++ compiler (e.g., GCC/Clang) installed on your Linux environment.
-4.  Run `make build` to compile the core engine and TUI.
-5.  Run `./rrs_app` to launch the terminal interface.
+2.  Install the dependencies (Ubuntu/Debian): `sudo apt-get install build-essential cmake libncurses-dev libssl-dev libgtest-dev`
+3.  Configure and build from the repository root. This produces the `rrs_app` executable and the unit-test binaries:
+    ```
+    cmake -S RRS/04_IMPLEMENTATION_TESTING/source-code -B build
+    cmake --build build --parallel
+    ```
+4.  Run all unit tests: `ctest --test-dir build --output-on-failure`
+5.  Launch the terminal interface: `./build/rrs_app`
+
+Every module has its own test binary (`rrs_*_tests`, plus `rrs_tests`) in `build/`; any one can be run directly. The `build/` directory is ignored by git.
