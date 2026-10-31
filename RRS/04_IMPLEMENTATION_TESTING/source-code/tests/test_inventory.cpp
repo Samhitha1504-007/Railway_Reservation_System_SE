@@ -4,7 +4,11 @@
 #include <cstring>
 #include <vector>
 
+#include "auth.h"
+#include "auth_internal.h"
 #include "inventory.h"
+#include "inventory_internal.h"
+#include "search.h"
 
 namespace {
 
@@ -26,6 +30,41 @@ std::vector<rrs_halt_t> good_route() {
 rrs_status_t validate(const std::vector<rrs_halt_t>& v) {
     return inventory_validate_route(v.data(), static_cast<int>(v.size()));
 }
+
+rrs_train_t make_train(const char* id, const std::vector<rrs_halt_t>& halts,
+                       int sleeper = 100, int ac3 = 50, int ac2 = 20) {
+    rrs_train_t t;
+    std::memset(&t, 0, sizeof t);
+    std::strncpy(t.train_id, id, RRS_TRAIN_ID_LEN - 1);
+    t.halt_count = static_cast<int>(halts.size());
+    std::memcpy(t.halts, halts.data(), halts.size() * sizeof(rrs_halt_t));
+    t.capacity[RRS_CLASS_SLEEPER] = sleeper;
+    t.capacity[RRS_CLASS_AC3] = ac3;
+    t.capacity[RRS_CLASS_AC2] = ac2;
+    return t;
+}
+
+const char* kTravelDate = "2030-01-15";
+
+bool searchable(const char* src, const char* dst) {
+    rrs_route_list_t out;
+    return search_routes(src, dst, kTravelDate, nullptr, &out) == RRS_OK && out.count > 0;
+}
+
+class InventoryTest : public ::testing::Test {
+protected:
+    rrs_session_t admin{};
+    rrs_session_t passenger{};
+
+    void SetUp() override {
+        auth_reset_for_tests();
+        inventory_reset_for_tests();
+        ASSERT_EQ(auth_create_user_for_tests("admin@rrs.test", "Admin1234", "Admin", RRS_ROLE_ADMIN), RRS_OK);
+        ASSERT_EQ(auth_register("pax@rrs.test", "Pass1234", "Passenger"), RRS_OK);
+        ASSERT_EQ(auth_login("admin@rrs.test", "Admin1234", &admin), RRS_OK);
+        ASSERT_EQ(auth_login("pax@rrs.test", "Pass1234", &passenger), RRS_OK);
+    }
+};
 
 }  // namespace
 
@@ -145,4 +184,175 @@ TEST(RouteValidationTest, TimesAndDistancesHaveUpperBounds) {
     EXPECT_EQ(validate(r), RRS_OK);
     r[2].distance_km = RRS_MAX_DISTANCE_KM + 1;
     EXPECT_EQ(validate(r), ERR_INVALID_INPUT);
+}
+
+/* ---------- FR-007: create train ---------- */
+
+TEST_F(InventoryTest, AdminCreatesATrainAndCanReadItBack) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_STREQ(got.train_id, "12001");
+    EXPECT_EQ(got.status, RRS_TRAIN_ACTIVE);
+    EXPECT_EQ(got.halt_count, 3);
+    EXPECT_STREQ(got.halts[1].station, "CNB");
+    EXPECT_EQ(got.halts[2].distance_km, 510);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+    EXPECT_EQ(got.capacity[RRS_CLASS_AC3], 50);
+    EXPECT_EQ(got.capacity[RRS_CLASS_AC2], 20);
+}
+
+TEST_F(InventoryTest, CreatedTrainBecomesSearchable) {
+    EXPECT_FALSE(searchable("NDLS", "LKO"));
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    EXPECT_TRUE(searchable("NDLS", "LKO"));
+    EXPECT_TRUE(searchable("NDLS", "CNB"));   /* intermediate halt */
+}
+
+TEST_F(InventoryTest, ClassWithZeroCapacityIsAllowedWhileAnotherHasSeats) {
+    rrs_train_t t = make_train("12001", good_route(), 0, 0, 40);
+    EXPECT_EQ(train_create(&admin, &t), RRS_OK);
+}
+
+TEST_F(InventoryTest, PassengerCannotCreateATrain) {
+    rrs_train_t t = make_train("12001", good_route());
+    EXPECT_EQ(train_create(&passenger, &t), ERR_FORBIDDEN);
+    EXPECT_EQ(inventory_train_count_for_tests(), 0);
+    EXPECT_FALSE(searchable("NDLS", "LKO"));
+}
+
+TEST_F(InventoryTest, MissingForgedOrLoggedOutSessionCannotCreate) {
+    rrs_train_t t = make_train("12001", good_route());
+    EXPECT_EQ(train_create(nullptr, &t), ERR_SESSION_EXPIRED);
+
+    rrs_session_t forged = admin;
+    forged.token[0] = forged.token[0] == 'a' ? 'b' : 'a';
+    EXPECT_EQ(train_create(&forged, &t), ERR_SESSION_EXPIRED);
+
+    rrs_session_t escalated = passenger;     /* passenger editing their copy to say ADMIN */
+    escalated.role = RRS_ROLE_ADMIN;
+    EXPECT_EQ(train_create(&escalated, &t), ERR_FORBIDDEN);
+
+    ASSERT_EQ(auth_logout(&admin), RRS_OK);
+    EXPECT_EQ(train_create(&admin, &t), ERR_SESSION_EXPIRED);
+    EXPECT_EQ(inventory_train_count_for_tests(), 0);
+}
+
+TEST_F(InventoryTest, DuplicateTrainIdIsRejectedAndOriginalKept) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+
+    rrs_train_t other = make_train("12001", {halt("BBS", 100, 100, 0), halt("HWH", 400, 400, 440)}, 7, 7, 7);
+    EXPECT_EQ(train_create(&admin, &other), ERR_DUPLICATE);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_STREQ(got.halts[0].station, "NDLS");
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+    EXPECT_EQ(inventory_train_count_for_tests(), 1);
+}
+
+TEST_F(InventoryTest, BadTrainIdsAreRejected) {
+    EXPECT_EQ(train_create(&admin, nullptr), ERR_INVALID_INPUT);
+
+    for (const char* bad : {"", "12 01", "12-01", "ELEVENCHARS"}) {
+        rrs_train_t b = make_train("X", good_route());
+        std::memset(b.train_id, 0, sizeof b.train_id);
+        if (std::strlen(bad) >= RRS_TRAIN_ID_LEN) {
+            std::memcpy(b.train_id, bad, RRS_TRAIN_ID_LEN);          /* no terminator */
+        } else {
+            std::strcpy(b.train_id, bad);
+        }
+        EXPECT_EQ(train_create(&admin, &b), ERR_INVALID_INPUT) << "id: '" << bad << "'";
+    }
+    EXPECT_EQ(inventory_train_count_for_tests(), 0);
+}
+
+TEST_F(InventoryTest, InvalidRouteIsRejectedAndNothingIsSaved) {
+    rrs_train_t t = make_train("12001", good_route());
+    t.halts[2].distance_km = t.halts[1].distance_km;     /* distance does not increase */
+    EXPECT_EQ(train_create(&admin, &t), ERR_INVALID_INPUT);
+
+    rrs_train_t one = make_train("12002", {halt("NDLS", 480, 480, 0)});
+    EXPECT_EQ(train_create(&admin, &one), ERR_INVALID_INPUT);
+
+    rrs_train_t bad_count = make_train("12003", good_route());
+    bad_count.halt_count = RRS_MAX_HALTS + 1;
+    EXPECT_EQ(train_create(&admin, &bad_count), ERR_INVALID_INPUT);
+
+    EXPECT_EQ(inventory_train_count_for_tests(), 0);
+    EXPECT_FALSE(searchable("NDLS", "LKO"));
+    rrs_train_t got;
+    EXPECT_EQ(train_get(&admin, "12001", &got), ERR_NOT_FOUND);
+}
+
+TEST_F(InventoryTest, BadCapacitiesAreRejected) {
+    for (auto caps : std::vector<std::vector<int>>{
+             {-1, 10, 10}, {10, -1, 10}, {10, 10, -1},
+             {RRS_MAX_CLASS_CAPACITY + 1, 0, 0}, {0, 0, 0}}) {
+        rrs_train_t t = make_train("12001", good_route(), caps[0], caps[1], caps[2]);
+        EXPECT_EQ(train_create(&admin, &t), ERR_INVALID_INPUT);
+    }
+    EXPECT_EQ(inventory_train_count_for_tests(), 0);
+
+    rrs_train_t max = make_train("12001", good_route(), RRS_MAX_CLASS_CAPACITY, 0, 0);
+    EXPECT_EQ(train_create(&admin, &max), RRS_OK);
+}
+
+TEST_F(InventoryTest, CallerCannotChooseTheInitialStatus) {
+    rrs_train_t t = make_train("12001", good_route());
+    t.status = RRS_TRAIN_RETIRED;
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.status, RRS_TRAIN_ACTIVE);
+    EXPECT_TRUE(searchable("NDLS", "LKO"));
+}
+
+TEST_F(InventoryTest, StoredTrainIsACopyOfTheCallersStruct) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    t.capacity[RRS_CLASS_SLEEPER] = 1;
+    t.halts[0].distance_km = 99;
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+    EXPECT_EQ(got.halts[0].distance_km, 0);
+}
+
+TEST_F(InventoryTest, FiveHundredTrainsAreSupported) {          /* NFR-008 */
+    char id[RRS_TRAIN_ID_LEN];
+    for (int i = 0; i < 600; ++i) {
+        std::snprintf(id, sizeof id, "T%04d", (i * 7919) % 10000);   /* unsorted insertion order */
+        rrs_train_t t = make_train(id, good_route());
+        ASSERT_EQ(train_create(&admin, &t), RRS_OK) << id;
+    }
+    EXPECT_EQ(inventory_train_count_for_tests(), 600);
+    rrs_train_t got;
+    for (int i = 0; i < 600; ++i) {
+        std::snprintf(id, sizeof id, "T%04d", (i * 7919) % 10000);
+        ASSERT_EQ(train_get(&passenger, id, &got), RRS_OK) << id;
+        EXPECT_STREQ(got.train_id, id);
+    }
+}
+
+/* ---------- train_get ---------- */
+
+TEST_F(InventoryTest, GetNeedsALiveSessionButNotAdmin) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    rrs_train_t got;
+    EXPECT_EQ(train_get(&passenger, "12001", &got), RRS_OK);
+    EXPECT_EQ(train_get(nullptr, "12001", &got), ERR_SESSION_EXPIRED);
+    EXPECT_EQ(got.train_id[0], '\0');                   /* zeroed on failure */
+}
+
+TEST_F(InventoryTest, GetUnknownTrainOrNullArgumentsFail) {
+    rrs_train_t got;
+    EXPECT_EQ(train_get(&admin, "99999", &got), ERR_NOT_FOUND);
+    EXPECT_EQ(train_get(&admin, nullptr, &got), ERR_INVALID_INPUT);
+    EXPECT_EQ(train_get(&admin, "12001", nullptr), ERR_INVALID_INPUT);
 }
