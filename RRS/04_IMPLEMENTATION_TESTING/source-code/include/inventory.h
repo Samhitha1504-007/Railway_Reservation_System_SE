@@ -59,6 +59,14 @@ typedef struct {
  * is loaded into it, so callers must not call search_graph_add_train directly.
  * Trains are kept in memory (persistence is added by the store module). */
 
+/* FR-011 hook, implemented by the booking module: how many CONFIRMED bookings
+ * a train's class holds right now (waitlisted and cancelled ones do not count). */
+typedef int (*rrs_confirmed_count_fn)(const char* train_id, rrs_class_t cls);
+
+/* Install the booking module's counter. Until one is installed every class is
+ * treated as having no confirmed bookings. Pass NULL to remove it. */
+void inventory_set_booking_counter(rrs_confirmed_count_fn counter);
+
 /* FR-007: create a train. Admin only.
  *   RRS_OK                  train stored as ACTIVE and added to the route graph
  *   ERR_SESSION_EXPIRED     null, forged or expired session
@@ -79,6 +87,9 @@ rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train
  *   ERR_INVALID_INPUT       null train, bad id, invalid route or bad capacities
  *   ERR_NOT_FOUND           no train with this id
  *   ERR_INVALID_INPUT       also: the train is retired and can no longer be edited
+ *   ERR_CAPACITY_CONFLICT   FR-011: some class's new capacity is below its number
+ *                           of confirmed bookings; nothing is changed, not even
+ *                           the other fields of the update
  * The status field is ignored: a train's status only changes through
  * train_retire().                                                          */
 rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train);
