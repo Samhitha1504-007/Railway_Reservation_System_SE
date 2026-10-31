@@ -113,6 +113,33 @@ static rrs_status_t require_live_session(const rrs_session_t* session)
     return st;
 }
 
+/* Reload the route graph from the stored trains. Only ACTIVE trains are
+ * searchable. */
+static rrs_status_t rebuild_graph(void)
+{
+    int i;
+
+    search_graph_clear();
+    for (i = 0; i < g_train_count; ++i) {
+        rrs_status_t st;
+        if (g_trains[i].status != RRS_TRAIN_ACTIVE) continue;
+        st = search_graph_add_train(g_trains[i].train_id, g_trains[i].halts,
+                                    g_trains[i].halt_count);
+        if (st != RRS_OK) return st;
+    }
+    return RRS_OK;
+}
+
+/* Copy the caller's definition into a stored record (status is not copied). */
+static void store_definition(rrs_train_t* slot, const rrs_train_t* train)
+{
+    memset(slot->halts, 0, sizeof slot->halts);
+    memcpy(slot->train_id, train->train_id, RRS_TRAIN_ID_LEN);
+    slot->halt_count = train->halt_count;
+    memcpy(slot->halts, train->halts, (size_t)train->halt_count * sizeof train->halts[0]);
+    memcpy(slot->capacity, train->capacity, sizeof slot->capacity);
+}
+
 /* ---- public API ---- */
 
 rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train)
@@ -140,12 +167,36 @@ rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train
             (size_t)(g_train_count - pos) * sizeof g_trains[0]);
     slot = &g_trains[pos];
     memset(slot, 0, sizeof *slot);
-    memcpy(slot->train_id, train->train_id, RRS_TRAIN_ID_LEN);
-    slot->halt_count = train->halt_count;
-    memcpy(slot->halts, train->halts, (size_t)train->halt_count * sizeof train->halts[0]);
-    memcpy(slot->capacity, train->capacity, sizeof slot->capacity);
+    store_definition(slot, train);
     slot->status = RRS_TRAIN_ACTIVE;
     ++g_train_count;
+    return RRS_OK;
+}
+
+rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train)
+{
+    rrs_status_t st = auth_authorize(session, RRS_ROLE_ADMIN);
+    rrs_train_t previous;
+    int pos;
+
+    if (st != RRS_OK) return st;
+    if (train == NULL || !train_id_ok(train->train_id) ||
+        !capacities_ok(train->capacity))
+        return ERR_INVALID_INPUT;
+    st = inventory_validate_route(train->halts, train->halt_count);
+    if (st != RRS_OK) return st;
+
+    pos = find_train(train->train_id);
+    if (pos < 0) return ERR_NOT_FOUND;
+
+    previous = g_trains[pos];
+    store_definition(&g_trains[pos], train);
+    st = rebuild_graph();
+    if (st != RRS_OK) {                      /* not expected after validation; keep the old schedule */
+        g_trains[pos] = previous;
+        rebuild_graph();
+        return st;
+    }
     return RRS_OK;
 }
 
