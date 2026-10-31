@@ -302,15 +302,20 @@ TEST_F(RbacTest, EditingTheUserIdFieldInvalidatesTheSession) {
     EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&forged, RRS_ROLE_PASSENGER));
 }
 
-TEST_F(RbacTest, SessionIsValidJustBeforeExpiryAndExpiredAtExpiry) {
+TEST_F(RbacTest, SessionIsValidJustBeforeTheIdleTimeout) {
     const time_t t0 = 1000000;
     rrs::session_set_fixed_time_for_tests(t0);
     rrs_session_t s;
     ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
-
     rrs::session_set_fixed_time_for_tests(t0 + rrs::kSessionTtlSeconds - 1);
     EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
 
+TEST_F(RbacTest, SessionIsExpiredAtTheIdleTimeout) {
+    const time_t t0 = 1000000;
+    rrs::session_set_fixed_time_for_tests(t0);
+    rrs_session_t s;
+    ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
     rrs::session_set_fixed_time_for_tests(t0 + rrs::kSessionTtlSeconds);
     EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
 }
@@ -327,4 +332,220 @@ TEST_F(RbacTest, ExpiredSessionIsReportedAsExpiredNotForbidden) {
 TEST_F(RbacTest, SessionsDoNotSurviveAStoreReset) {
     auth_reset_for_tests();
     EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&passenger, RRS_ROLE_PASSENGER));
+}
+
+/* ---------- FR-006: logout and idle timeout ---------- */
+
+class SessionLifecycleTest : public ::testing::Test {
+protected:
+    rrs_session_t s;
+    const time_t t0 = 5000000;
+
+    void SetUp() override {
+        auth_reset_for_tests();
+        ASSERT_EQ(RRS_OK, auth_register("rider@example.com", "Passw0rdOK", "Rider"));
+        rrs::session_set_fixed_time_for_tests(t0);
+        ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
+    }
+    void TearDown() override { rrs::session_set_fixed_time_for_tests(0); }
+    void now_is(time_t t) { rrs::session_set_fixed_time_for_tests(t); }
+};
+
+TEST_F(SessionLifecycleTest, LogoutEndsTheSession) {
+    EXPECT_EQ(RRS_OK, auth_logout(&s));
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    EXPECT_EQ(0u, rrs::session_count());
+}
+
+TEST_F(SessionLifecycleTest, LoggingOutTwiceFailsTheSecondTime) {
+    ASSERT_EQ(RRS_OK, auth_logout(&s));
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&s));
+}
+
+TEST_F(SessionLifecycleTest, LogoutWithNullSessionIsRejected) {
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(nullptr));
+    EXPECT_EQ(1u, rrs::session_count());
+}
+
+TEST_F(SessionLifecycleTest, LogoutOnlyEndsThatSession) {
+    rrs_session_t other;
+    ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &other));
+    ASSERT_EQ(RRS_OK, auth_logout(&s));
+    EXPECT_EQ(RRS_OK, auth_authorize(&other, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, LogoutWithEditedUserIdIsRejectedAndSessionSurvives) {
+    rrs_session_t forged = s;
+    std::strncpy(forged.user_id, "not-the-real-user-id", RRS_USER_ID_LEN - 1);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&forged));
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, LogoutWithMadeUpTokenIsRejectedAndSessionSurvives) {
+    rrs_session_t fake = s;
+    std::memset(fake.token, 'a', RRS_TOKEN_LEN - 1);
+    fake.token[RRS_TOKEN_LEN - 1] = '\0';
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&fake));
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, LogoutAfterTheIdleTimeoutIsRejected) {
+    now_is(t0 + rrs::kSessionTtlSeconds);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_logout(&s));
+}
+
+TEST_F(SessionLifecycleTest, ExpiredSessionIsRemovedFromTheStore) {
+    now_is(t0 + rrs::kSessionTtlSeconds);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    EXPECT_EQ(0u, rrs::session_count());
+}
+
+TEST_F(SessionLifecycleTest, ActivityRestartsTheIdleTimer) {
+    const int ttl = rrs::kSessionTtlSeconds;
+    now_is(t0 + ttl - 1);                                  /* just before the first deadline */
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    now_is(t0 + 2 * ttl - 2);                              /* past the ORIGINAL deadline */
+    EXPECT_EQ(RRS_OK, auth_authorize(&s, RRS_ROLE_PASSENGER));
+    now_is(t0 + 3 * ttl - 2);                              /* a full idle period after the last call */
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+TEST_F(SessionLifecycleTest, RejectedCallsDoNotRestartTheIdleTimer) {
+    rrs_session_t fake = s;
+    std::memset(fake.token, 'b', RRS_TOKEN_LEN - 1);
+    fake.token[RRS_TOKEN_LEN - 1] = '\0';
+    now_is(t0 + rrs::kSessionTtlSeconds - 1);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&fake, RRS_ROLE_PASSENGER));   /* not the real session */
+    now_is(t0 + rrs::kSessionTtlSeconds);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_authorize(&s, RRS_ROLE_PASSENGER));
+}
+
+/* ---------- FR-005: view and update own profile ---------- */
+
+class ProfileTest : public ::testing::Test {
+protected:
+    rrs_session_t s, other;
+    void SetUp() override {
+        auth_reset_for_tests();
+        ASSERT_EQ(RRS_OK, auth_register("Rider@Example.com", "Passw0rdOK", "Rider One"));
+        ASSERT_EQ(RRS_OK, auth_register("other@example.com", "Passw0rdOK", "Other Person"));
+        ASSERT_EQ(RRS_OK, auth_login("rider@example.com", "Passw0rdOK", &s));
+        ASSERT_EQ(RRS_OK, auth_login("other@example.com", "Passw0rdOK", &other));
+    }
+    void TearDown() override { rrs::session_set_fixed_time_for_tests(0); }
+};
+
+TEST_F(ProfileTest, ViewReturnsOwnDetails) {
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&s, &p));
+    EXPECT_STREQ("rider@example.com", p.email);          /* stored lower-case */
+    EXPECT_STREQ("Rider One", p.name);
+    EXPECT_STREQ(s.user_id, p.user_id);
+    EXPECT_EQ(RRS_ROLE_PASSENGER, p.role);
+}
+
+TEST_F(ProfileTest, ViewNeverShowsAnotherUsersDetails) {
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&other, &p));
+    EXPECT_STREQ("other@example.com", p.email);
+    EXPECT_STREQ("Other Person", p.name);
+}
+
+TEST_F(ProfileTest, ViewRejectsBadSessionsAndZeroesTheOutput) {
+    rrs_profile_t p;
+    std::memset(&p, 0xAB, sizeof p);
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_profile_get(nullptr, &p));
+    EXPECT_EQ(0u, std::strlen(p.email));
+    rrs_session_t fake = s;
+    std::memset(fake.token, 'a', RRS_TOKEN_LEN - 1);
+    fake.token[RRS_TOKEN_LEN - 1] = '\0';
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_profile_get(&fake, &p));
+    EXPECT_EQ(ERR_INVALID_INPUT, auth_profile_get(&s, nullptr));
+}
+
+TEST_F(ProfileTest, EditedUserIdInTheSessionCopyDoesNotShowSomeoneElsesProfile) {
+    rrs_session_t forged = s;
+    std::strncpy(forged.user_id, other.user_id, RRS_USER_ID_LEN - 1);
+    rrs_profile_t p;
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_profile_get(&forged, &p));
+}
+
+TEST_F(ProfileTest, AdminCanViewOwnProfile) {
+    ASSERT_EQ(RRS_OK, auth_create_user_for_tests("admin@example.com", "Adm1nPassw0rd", "Admin", RRS_ROLE_ADMIN));
+    rrs_session_t a;
+    ASSERT_EQ(RRS_OK, auth_login("admin@example.com", "Adm1nPassw0rd", &a));
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&a, &p));
+    EXPECT_EQ(RRS_ROLE_ADMIN, p.role);
+}
+
+TEST_F(ProfileTest, UpdateNameIsVisibleInTheProfile) {
+    ASSERT_EQ(RRS_OK, auth_profile_update(&s, "New Name", nullptr));
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&s, &p));
+    EXPECT_STREQ("New Name", p.name);
+    EXPECT_STREQ("rider@example.com", p.email);
+}
+
+TEST_F(ProfileTest, UpdateEmailMovesLoginToTheNewAddress) {
+    ASSERT_EQ(RRS_OK, auth_profile_update(&s, nullptr, "New.Rider@Example.com"));
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&s, &p));
+    EXPECT_STREQ("new.rider@example.com", p.email);
+    rrs_session_t again;
+    EXPECT_EQ(RRS_OK, auth_login("new.rider@example.com", "Passw0rdOK", &again));
+    EXPECT_EQ(ERR_AUTH_FAILED, auth_login("rider@example.com", "Passw0rdOK", &again));
+}
+
+TEST_F(ProfileTest, UpdateKeepsThePasswordAndRole) {
+    ASSERT_EQ(RRS_OK, auth_profile_update(&s, "New Name", "new@example.com"));
+    rrs_session_t again;
+    ASSERT_EQ(RRS_OK, auth_login("new@example.com", "Passw0rdOK", &again));
+    EXPECT_EQ(RRS_ROLE_PASSENGER, again.role);
+}
+
+TEST_F(ProfileTest, UpdateToAnotherUsersEmailIsRejectedAndNothingChanges) {
+    EXPECT_EQ(ERR_DUPLICATE, auth_profile_update(&s, "Changed Name", "OTHER@example.com"));
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&s, &p));
+    EXPECT_STREQ("Rider One", p.name);                    /* the name change was not applied either */
+    EXPECT_STREQ("rider@example.com", p.email);
+}
+
+TEST_F(ProfileTest, UpdateToOwnEmailInADifferentCaseIsAllowed) {
+    EXPECT_EQ(RRS_OK, auth_profile_update(&s, nullptr, "RIDER@EXAMPLE.COM"));
+}
+
+TEST_F(ProfileTest, UpdateRejectsInvalidValuesAndNothingChanges) {
+    EXPECT_EQ(ERR_INVALID_INPUT, auth_profile_update(&s, "", nullptr));
+    EXPECT_EQ(ERR_INVALID_INPUT, auth_profile_update(&s, "   ", nullptr));
+    EXPECT_EQ(ERR_INVALID_INPUT, auth_profile_update(&s, "Good Name", "not-an-email"));
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&s, &p));
+    EXPECT_STREQ("Rider One", p.name);
+    EXPECT_STREQ("rider@example.com", p.email);
+}
+
+TEST_F(ProfileTest, UpdateWithNothingToChangeIsRejected) {
+    EXPECT_EQ(ERR_INVALID_INPUT, auth_profile_update(&s, nullptr, nullptr));
+}
+
+TEST_F(ProfileTest, UpdateOnlyAffectsTheCallersOwnAccount) {
+    ASSERT_EQ(RRS_OK, auth_profile_update(&s, "Changed", nullptr));
+    rrs_profile_t p;
+    ASSERT_EQ(RRS_OK, auth_profile_get(&other, &p));
+    EXPECT_STREQ("Other Person", p.name);
+}
+
+TEST_F(ProfileTest, ExpiredOrLoggedOutSessionsCannotUpdate) {
+    ASSERT_EQ(RRS_OK, auth_logout(&other));
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_profile_update(&other, "X Y", nullptr));
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_profile_update(nullptr, "X Y", nullptr));
+}
+
+TEST_F(ProfileTest, IdleExpiredSessionCannotViewOrUpdate) {
+    rrs::session_set_fixed_time_for_tests(time(nullptr) + rrs::kSessionTtlSeconds + 5);
+    rrs_profile_t p;
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_profile_get(&s, &p));
+    EXPECT_EQ(ERR_SESSION_EXPIRED, auth_profile_update(&s, "X Y", nullptr));
 }

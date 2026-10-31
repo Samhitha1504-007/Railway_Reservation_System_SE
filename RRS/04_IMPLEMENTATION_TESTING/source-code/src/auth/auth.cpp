@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -143,6 +144,63 @@ extern "C" rrs_status_t auth_login(const char* email, const char* password, rrs_
         return ERR_IO;
     }
     return RRS_OK;
+}
+
+namespace {
+UserRecord* find_user_by_id(const std::string& id) {
+    for (auto& u : g_users)
+        if (u.user_id == id) return &u;
+    return nullptr;
+}
+}  // namespace
+
+extern "C" rrs_status_t auth_profile_get(const rrs_session_t* session, rrs_profile_t* out) {
+    if (!out) return ERR_INVALID_INPUT;
+    std::memset(out, 0, sizeof *out);
+
+    rrs::SessionInfo info;
+    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid)
+        return ERR_SESSION_EXPIRED;
+    const UserRecord* u = find_user_by_id(info.user_id);
+    if (!u) return ERR_NOT_FOUND;
+
+    std::snprintf(out->user_id, sizeof out->user_id, "%s", u->user_id.c_str());
+    std::snprintf(out->email, sizeof out->email, "%s", u->email.c_str());
+    std::snprintf(out->name, sizeof out->name, "%s", u->name.c_str());
+    out->role = u->role;
+    return RRS_OK;
+}
+
+extern "C" rrs_status_t auth_profile_update(const rrs_session_t* session, const char* new_name,
+                                            const char* new_email) {
+    rrs::SessionInfo info;
+    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid)
+        return ERR_SESSION_EXPIRED;
+    if (!new_name && !new_email) return ERR_INVALID_INPUT;
+
+    UserRecord* u = find_user_by_id(info.user_id);
+    if (!u) return ERR_NOT_FOUND;
+
+    /* validate everything first so a bad field changes nothing */
+    std::string name, email;
+    if (new_name) {
+        name = new_name;
+        if (!rrs::is_valid_name(name)) return ERR_INVALID_INPUT;
+    }
+    if (new_email) {
+        if (!rrs::is_valid_email(new_email)) return ERR_INVALID_INPUT;
+        email = rrs::normalize_email(new_email);
+        const UserRecord* other = find_user(email);
+        if (other && other != u) return ERR_DUPLICATE;     /* own email in another case is fine */
+    }
+
+    if (new_name) u->name = name;
+    if (new_email) u->email = email;
+    return RRS_OK;
+}
+
+extern "C" rrs_status_t auth_logout(const rrs_session_t* session) {
+    return rrs::session_destroy(session) ? RRS_OK : ERR_SESSION_EXPIRED;
 }
 
 void auth_reset_for_tests(void) {

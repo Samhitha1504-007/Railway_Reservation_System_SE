@@ -1,6 +1,6 @@
 /*
  * session.h - session store used by the auth module (internal).
- * login creates sessions here; validation and logout (FR-006) are added later.
+ * Sessions live on the server side; the copy a caller holds is never trusted.
  */
 #ifndef RRS_SESSION_H
 #define RRS_SESSION_H
@@ -12,8 +12,10 @@
 
 namespace rrs {
 
-/* How long a session lives after login. The SRS says "a defined period"
- * (FR-006) without a number, so this value must be written into the SRS. */
+/* Idle timeout (FR-006): a session ends after this many seconds without a
+ * successful authenticated call. Every successful call restarts the timer.
+ * The SRS says "a defined period" without a number, so this value must be
+ * written into the SRS (FR-006). */
 const int kSessionTtlSeconds = 15 * 60;
 
 /* Create a session for a user and register it. Fills `out`.
@@ -29,11 +31,16 @@ struct SessionInfo {
     time_t      expiry;
 };
 
-/* Look a token up in the server-side store.
- *   Invalid : token not found
- *   Expired : found, but now >= expiry
- *   Valid   : found and still live; `info` is filled in             */
-SessionStatus session_validate(const char* token, SessionInfo& info);
+/* Check a caller's session against the server-side record.
+ *   Valid   : known token, user id matches, not idle for too long.
+ *             Counts as activity: the idle timer restarts. `info` is filled in.
+ *   Invalid : null, malformed, unknown or tampered (user id does not match)
+ *   Expired : was valid but idle too long; the session is removed          */
+SessionStatus session_authenticate(const rrs_session_t* session, SessionInfo& info);
+
+/* Remove the caller's session (logout). Same checks as session_authenticate.
+ * Returns true only if a live session was removed. */
+bool session_destroy(const rrs_session_t* session);
 
 /* Number of sessions currently stored (used by tests). */
 size_t session_count();
