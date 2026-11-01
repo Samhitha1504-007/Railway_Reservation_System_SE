@@ -47,17 +47,17 @@ protected:
     rrs_session_t passenger_session;
 
     void SetUp() override {
-        auth_test_clear();
+        auth_reset_for_tests();
         booking_clear();
         booking_init();
 
         /* Set up admin */
-        ASSERT_EQ(auth_test_seed_admin("admin@rrs.test", "AdminPass123!", "System Admin"), RRS_OK);
-        ASSERT_EQ(auth_login("admin@rrs.test", "AdminPass123!", &admin_session), RRS_OK);
+        ASSERT_EQ(auth_create_user_for_tests("admin@rrs.test", "Admin1234", "Admin", RRS_ROLE_ADMIN), RRS_OK);
+        ASSERT_EQ(auth_login("admin@rrs.test", "Admin1234", &admin_session), RRS_OK);
 
         /* Set up passenger */
-        ASSERT_EQ(auth_register("passenger@rrs.test", "Pass1234!", "Test Passenger"), RRS_OK);
-        ASSERT_EQ(auth_login("passenger@rrs.test", "Pass1234!", &passenger_session), RRS_OK);
+        ASSERT_EQ(auth_register("passenger@rrs.test", "Pass1234", "Test Passenger"), RRS_OK);
+        ASSERT_EQ(auth_login("passenger@rrs.test", "Pass1234", &passenger_session), RRS_OK);
 
         /* Create a valid active train for booking */
         rrs_train_t t = make_train("EXP101", 100, 50, 20);
@@ -66,7 +66,7 @@ protected:
 
     void TearDown() override {
         booking_clear();
-        auth_test_clear();
+        auth_reset_for_tests();
     }
 };
 
