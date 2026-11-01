@@ -95,6 +95,9 @@ rrs_status_t booking_create(const rrs_session_t* session,
     if (travel_class < 0 || travel_class >= RRS_CLASS_COUNT) {
         return ERR_INVALID_INPUT;
     }
+    if (idempotency_key && memchr(idempotency_key, '\0', RRS_IDEMPOTENCY_KEY_LEN) == NULL) {
+        return ERR_INVALID_INPUT;
+    }
     if (!booking_internal_train_id_ok(train_id)) {
         return ERR_INVALID_INPUT;
     }
@@ -317,10 +320,20 @@ rrs_status_t booking_cancel(const rrs_session_t* session, const char* pnr)
 rrs_status_t waitlist_promote(const char* train_id, rrs_class_t cls)
 {
     const char* head_pnr;
+    int cap;
     int i;
 
     if (!train_id || cls < 0 || cls >= RRS_CLASS_COUNT) {
         return ERR_INVALID_INPUT;
+    }
+
+    cap = train_get_capacity(train_id, cls);
+    if (cap < 0) {
+        return ERR_NOT_FOUND;
+    }
+
+    if (booking_count_confirmed(train_id, cls) >= cap) {
+        return RRS_OK;
     }
 
     head_pnr = waitlist_internal_pop_head(train_id, cls);

@@ -110,6 +110,10 @@ rrs_status_t train_retire(const rrs_session_t* session, const char* train_id);
  * (unknown, retired or null id). Needs no session; the facade checks those. */
 int train_is_bookable(const char* train_id);
 
+/* For the booking module: seat capacity of a class, or -1 if the train is not
+ * found or cls is invalid. Needs no session. */
+int train_get_capacity(const char* train_id, rrs_class_t cls);
+
 /* Read one train, retired ones included. Any live session may call it.
  *   RRS_OK                  `out` filled in
  *   ERR_SESSION_EXPIRED     null, forged or expired session

@@ -48,6 +48,11 @@ target_include_directories(rrs_inventory
 )
 target_link_libraries(rrs_inventory PUBLIC rrs_search PRIVATE rrs_auth)
 
+# Console walkthrough of the Sprint 1 features (no TUI needed).
+add_executable(rrs_demo src/demo/rrs_demo.cpp)
+target_include_directories(rrs_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/auth")
+target_link_libraries(rrs_demo PRIVATE rrs_auth rrs_inventory rrs_search)
+
 # Booking module (C11). Public header: include/booking.h
 add_library(rrs_booking STATIC
     src/booking/booking.c
