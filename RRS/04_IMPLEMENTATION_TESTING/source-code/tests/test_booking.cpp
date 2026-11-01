@@ -10,6 +10,7 @@
 #include "booking.h"
 #include "booking_internal.h"
 #include "inventory.h"
+#include "inventory_internal.h"
 #include "search.h"
 
 namespace {
@@ -48,6 +49,7 @@ protected:
 
     void SetUp() override {
         auth_reset_for_tests();
+        inventory_reset_for_tests();
         booking_clear();
         booking_init();
 
@@ -66,6 +68,7 @@ protected:
 
     void TearDown() override {
         booking_clear();
+        inventory_reset_for_tests();
         auth_reset_for_tests();
     }
 };

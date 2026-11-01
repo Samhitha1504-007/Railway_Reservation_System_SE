@@ -74,6 +74,7 @@ target_include_directories(rrs_booking_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/booking"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
 )
 target_link_libraries(rrs_booking_tests PRIVATE rrs_booking rrs_inventory rrs_auth GTest::gtest_main)
 add_test(NAME rrs_booking_tests COMMAND rrs_booking_tests)
