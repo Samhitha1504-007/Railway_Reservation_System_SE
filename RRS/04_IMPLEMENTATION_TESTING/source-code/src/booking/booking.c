@@ -218,6 +218,55 @@ rrs_status_t booking_get(const rrs_session_t* session,
     return ERR_NOT_FOUND;
 }
 
+static void sync_waitlist_positions(const char* train_id, rrs_class_t cls)
+{
+    int i;
+    for (i = 0; i < g_booking_count; ++i) {
+        if (g_bookings[i].status == RRS_BOOKING_WAITLISTED &&
+            g_bookings[i].travel_class == cls &&
+            strcmp(g_bookings[i].train_id, train_id) == 0) {
+            g_bookings[i].waitlist_position =
+                waitlist_internal_get_position(train_id, cls, g_bookings[i].pnr);
+        }
+    }
+}
+
+rrs_status_t booking_list_by_passenger(const rrs_session_t* session,
+                                       rrs_booking_t* out_bookings,
+                                       int max_count,
+                                       int* actual_count)
+{
+    rrs_status_t auth_st;
+    int found = 0;
+    int i;
+
+    if (actual_count) *actual_count = 0;
+    if (!session || !out_bookings || max_count <= 0 || !actual_count) {
+        return ERR_INVALID_INPUT;
+    }
+
+    auth_st = auth_authorize(session, RRS_ROLE_PASSENGER);
+    if (auth_st != RRS_OK) {
+        return auth_st;
+    }
+
+    for (i = 0; i < g_booking_count && found < max_count; ++i) {
+        if (strcmp(g_bookings[i].passenger_id, session->user_id) == 0) {
+            if (g_bookings[i].status == RRS_BOOKING_WAITLISTED) {
+                g_bookings[i].waitlist_position =
+                    waitlist_internal_get_position(g_bookings[i].train_id,
+                                                   g_bookings[i].travel_class,
+                                                   g_bookings[i].pnr);
+            }
+            out_bookings[found] = g_bookings[i];
+            found++;
+        }
+    }
+
+    *actual_count = found;
+    return RRS_OK;
+}
+
 rrs_status_t booking_cancel(const rrs_session_t* session, const char* pnr)
 {
     rrs_status_t auth_pass, auth_admin;
@@ -251,6 +300,7 @@ rrs_status_t booking_cancel(const rrs_session_t* session, const char* pnr)
                                          g_bookings[i].pnr);
                 g_bookings[i].status = RRS_BOOKING_CANCELLED;
                 g_bookings[i].waitlist_position = 0;
+                sync_waitlist_positions(g_bookings[i].train_id, g_bookings[i].travel_class);
             } else if (g_bookings[i].status == RRS_BOOKING_CONFIRMED) {
                 g_bookings[i].status = RRS_BOOKING_CANCELLED;
                 /* Auto-promote next waitlisted passenger (FR-022) */
@@ -282,6 +332,7 @@ rrs_status_t waitlist_promote(const char* train_id, rrs_class_t cls)
         if (strcmp(g_bookings[i].pnr, head_pnr) == 0) {
             g_bookings[i].status = RRS_BOOKING_CONFIRMED;
             g_bookings[i].waitlist_position = 0;
+            sync_waitlist_positions(train_id, cls);
             return RRS_OK;
         }
     }

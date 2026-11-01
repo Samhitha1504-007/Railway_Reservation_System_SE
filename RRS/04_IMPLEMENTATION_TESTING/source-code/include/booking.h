@@ -82,6 +82,15 @@ rrs_status_t booking_get(const rrs_session_t* session,
                          rrs_booking_t* out);
 
 /*
+ * FR-023: Retrieve all bookings belonging to the authenticated passenger.
+ * Returns the count in `*actual_count` up to `max_count`.
+ */
+rrs_status_t booking_list_by_passenger(const rrs_session_t* session,
+                                       rrs_booking_t* out_bookings,
+                                       int max_count,
+                                       int* actual_count);
+
+/*
  * FR-021: Cancel a booking by PNR.
  * Only the owner of the ticket or an admin can cancel it.
  * If a confirmed booking is cancelled, auto-promotes the head of the waitlist (FR-022).
