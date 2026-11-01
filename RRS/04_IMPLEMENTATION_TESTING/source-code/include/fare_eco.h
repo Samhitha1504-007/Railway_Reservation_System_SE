@@ -86,7 +86,8 @@ typedef struct {
  * No new search is run (SRS 5.3.2). An empty result after filtering is RRS_OK
  * with out->count == 0.
  *   ERR_INVALID_INPUT   null pointer, bad class, concession or sort key, or
- *                       a negative filter value                             */
+ *                       a negative filter value, min_eco_score above 100
+ *                       or direct_only other than 0/1                      */
 rrs_status_t search_rank(const rrs_route_list_t* routes, rrs_class_t cls,
                          rrs_concession_t concession, rrs_sort_key_t key,
                          const rrs_filter_t* filter, rrs_option_list_t* out);

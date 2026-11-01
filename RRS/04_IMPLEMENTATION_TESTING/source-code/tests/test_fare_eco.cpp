@@ -207,6 +207,27 @@ TEST_F(RankTest, RankingDoesNotChangeTheInput) {
     EXPECT_EQ(0, std::memcmp(&before, &list, sizeof list));
 }
 
+TEST_F(RankTest, FilterValuesOutsideTheirRangeAreRejected) {
+    rrs_filter_t f{};
+    f.min_eco_score = 100;
+    EXPECT_EQ(RRS_OK, rank(RRS_SORT_TIME, &f));   /* upper bound itself is allowed */
+    f.min_eco_score = 101;
+    EXPECT_EQ(ERR_INVALID_INPUT, rank(RRS_SORT_TIME, &f));
+    EXPECT_EQ(0, out.count);
+    f.min_eco_score = 150;
+    EXPECT_EQ(ERR_INVALID_INPUT, rank(RRS_SORT_TIME, &f));
+    f.min_eco_score = -1;
+    EXPECT_EQ(ERR_INVALID_INPUT, rank(RRS_SORT_TIME, &f));
+
+    f = rrs_filter_t{};
+    f.direct_only = 5;
+    EXPECT_EQ(ERR_INVALID_INPUT, rank(RRS_SORT_TIME, &f));
+    f.direct_only = -1;
+    EXPECT_EQ(ERR_INVALID_INPUT, rank(RRS_SORT_TIME, &f));
+    f.direct_only = 1;
+    EXPECT_EQ(RRS_OK, rank(RRS_SORT_TIME, &f));
+}
+
 TEST_F(RankTest, InvalidInputIsRejected) {
     rrs_filter_t f{};
     f.max_fare = -1;

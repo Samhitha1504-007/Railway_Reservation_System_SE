@@ -73,7 +73,9 @@ extern "C" rrs_status_t search_rank(const rrs_route_list_t* routes, rrs_class_t 
     if (key < RRS_SORT_TIME || key > RRS_SORT_ECO) return ERR_INVALID_INPUT;
     rrs_filter_t f{};
     if (filter) f = *filter;
-    if (f.max_fare < 0 || f.max_minutes < 0 || f.min_eco_score < 0) return ERR_INVALID_INPUT;
+    if (f.max_fare < 0 || f.max_minutes < 0) return ERR_INVALID_INPUT;
+    if (f.min_eco_score < 0 || f.min_eco_score > 100) return ERR_INVALID_INPUT;
+    if (f.direct_only != 0 && f.direct_only != 1) return ERR_INVALID_INPUT;
 
     rrs_route_option_t opts[RRS_MAX_ROUTES];
     int n = 0;
