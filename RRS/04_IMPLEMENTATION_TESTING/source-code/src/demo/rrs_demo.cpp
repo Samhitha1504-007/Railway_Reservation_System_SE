@@ -28,7 +28,18 @@ const char* status_name(rrs_status_t st) {
     }
 }
 
-void heading(const char* text) { std::printf("\n== %s ==\n", text); }
+/* Wait for Enter so each step can be explained while the demo runs. */
+void pause() {
+    std::printf("\n  [press Enter to continue]");
+    std::fflush(stdout);
+    int c;
+    while ((c = std::getchar()) != '\n' && c != EOF) {}
+}
+
+void heading(const char* text, const char* explain) {
+    pause();
+    std::printf("\n== %s ==\n   %s\n\n", text, explain);
+}
 
 void step(const char* what, rrs_status_t st) {
     std::printf("  %-40s %s\n", what, status_name(st));
@@ -66,10 +77,10 @@ rrs_train_t train(const char* id, std::initializer_list<rrs_halt_t> halts, int s
 
 int hm(int h, int m) { return h * 60 + m; }
 
-void search(const char* from, const char* to) {
+void search(const char* from, const char* to, const char* explain) {
     char title[64];
     std::snprintf(title, sizeof title, "Search %s -> %s on %s", from, to, kDate);
-    heading(title);
+    heading(title, explain);
     rrs_route_list_t out;
     rrs_status_t st = search_routes(from, to, kDate, nullptr, &out);
     if (st != RRS_OK) {
@@ -99,7 +110,7 @@ void search(const char* from, const char* to) {
 int main() {
     std::printf("Railway Reservation System - Sprint 1 console demo\n");
 
-    heading("Register passengers");
+    heading("Register passengers", "Riya signs up; then we try a duplicate email, a bad email and a weak password.");
     step("riya@example.com", auth_register("riya@example.com", "Passw0rdOK", "Riya"));
     step("riya@example.com again", auth_register("RIYA@example.com", "Another1Pass", "Riya 2"));
     step("bad email 'riya.example.com'", auth_register("riya.example.com", "Passw0rdOK", "Riya"));
@@ -108,7 +119,7 @@ int main() {
     /* Admins cannot self-register; seed one for the demo. */
     auth_create_user_for_tests("admin@rrs.in", "Adm1nPassw0rd", "Station Admin", RRS_ROLE_ADMIN);
 
-    heading("Log in");
+    heading("Log in", "A wrong password first, then Riya and the admin log in and get a role.");
     rrs_session_t passenger, admin, bad;
     step("riya, wrong password", auth_login("riya@example.com", "wrong1Pass", &bad));
     rrs_status_t st = auth_login("riya@example.com", "Passw0rdOK", &passenger);
@@ -118,7 +129,7 @@ int main() {
     step("admin@rrs.in (seeded admin)", st);
     std::printf("  %-40s %s\n", "  role", admin.role == RRS_ROLE_ADMIN ? "ADMIN" : "PASSENGER");
 
-    heading("Admin adds trains");
+    heading("Admin adds trains", "The admin creates three trains; a passenger tries too, and a bad route is entered.");
     rrs_train_t t1 = train("12627", {halt("SBC", hm(6, 0), hm(6, 0), 0),
                                      halt("MAS", hm(11, 0), hm(11, 10), 360),
                                      halt("NDLS", hm(30, 0), hm(30, 0), 2400)}, 400, 200, 100);
@@ -134,15 +145,16 @@ int main() {
     rrs_train_t loop = train("11111", {halt("SBC", 0, 0, 0), halt("SBC", 300, 300, 100)}, 10, 0, 0);
     step("admin adds a route that repeats SBC", train_create(&admin, &loop));
 
-    search("SBC", "NDLS");
-    search("SBC", "LKO");
+    search("SBC", "NDLS", "Bengaluru to New Delhi: two direct trains, fastest first.");
+    search("SBC", "LKO", "Bengaluru to Lucknow: no direct train, so the search changes at New Delhi.");
 
-    heading("Admin retires 12627");
+    heading("Admin retires 12627", "The admin takes train 12627 out of service.");
     step("retire 12627", train_retire(&admin, "12627"));
-    search("SBC", "NDLS");
+    search("SBC", "NDLS", "Same search again: 12627 is gone.");
 
-    heading("Log out");
+    heading("Log out", "Riya logs out; her old session should stop working.");
     step("riya logs out", auth_logout(&passenger));
     step("riya tries to view a train afterwards", train_get(&passenger, "12627", &t4));
+    std::printf("\nEnd of Sprint 1 demo.\n");
     return 0;
 }
