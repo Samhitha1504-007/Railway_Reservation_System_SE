@@ -250,6 +250,16 @@ int train_is_bookable(const char* train_id)
     return pos >= 0 && g_trains[pos].status == RRS_TRAIN_ACTIVE;
 }
 
+int train_get_capacity(const char* train_id, rrs_class_t cls)
+{
+    int pos;
+
+    if (train_id == NULL || cls < 0 || cls >= RRS_CLASS_COUNT) return -1;
+    pos = find_train(train_id);
+    if (pos < 0) return -1;
+    return g_trains[pos].capacity[cls];
+}
+
 rrs_status_t train_get(const rrs_session_t* session, const char* train_id, rrs_train_t* out)
 {
     rrs_status_t st;

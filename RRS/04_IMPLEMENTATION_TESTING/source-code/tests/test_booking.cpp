@@ -282,4 +282,47 @@ TEST_F(BookingTest, EnqueuesWaitlistWhenClassFullAndAutoPromotesOnCancel) {
     EXPECT_EQ(booking_count_confirmed("TINY1", RRS_CLASS_AC2), 1);
 }
 
+TEST_F(BookingTest, RejectsIdempotencyKeyExceedingMaxLength) {
+    std::string long_key(80, 'k');
+    rrs_booking_t b;
+    EXPECT_EQ(booking_create(&passenger_session, "EXP101", RRS_CLASS_AC3, 850.0,
+                             long_key.c_str(), &b),
+              ERR_INVALID_INPUT);
+    EXPECT_EQ(booking_count_confirmed("EXP101", RRS_CLASS_AC3), 0);
+}
+
+TEST_F(BookingTest, WaitlistPromoteDoesNotOverAllocateWhenCapacityFull) {
+    /* 1-seat class */
+    rrs_train_t t = make_train("T1", 1, 0, 0);
+    ASSERT_EQ(train_create(&admin_session, &t), RRS_OK);
+
+    ASSERT_EQ(auth_register("user1@rrs.test", "Pass1234!", "User One"), RRS_OK);
+    rrs_session_t s1;
+    ASSERT_EQ(auth_login("user1@rrs.test", "Pass1234!", &s1), RRS_OK);
+
+    ASSERT_EQ(auth_register("user2@rrs.test", "Pass1234!", "User Two"), RRS_OK);
+    rrs_session_t s2;
+    ASSERT_EQ(auth_login("user2@rrs.test", "Pass1234!", &s2), RRS_OK);
+
+    rrs_booking_t b1, b2;
+    ASSERT_EQ(booking_create(&s1, "T1", RRS_CLASS_SLEEPER, 500.0, "k1", &b1), RRS_OK);
+    EXPECT_EQ(b1.status, RRS_BOOKING_CONFIRMED);
+
+    ASSERT_EQ(booking_create(&s2, "T1", RRS_CLASS_SLEEPER, 500.0, "k2", &b2), RRS_OK);
+    EXPECT_EQ(b2.status, RRS_BOOKING_WAITLISTED);
+
+    EXPECT_EQ(booking_count_confirmed("T1", RRS_CLASS_SLEEPER), 1);
+    EXPECT_EQ(booking_count_waitlisted("T1", RRS_CLASS_SLEEPER), 1);
+
+    /* Calling waitlist_promote directly when capacity is full must not over-allocate */
+    EXPECT_EQ(waitlist_promote("T1", RRS_CLASS_SLEEPER), RRS_OK);
+
+    EXPECT_EQ(booking_count_confirmed("T1", RRS_CLASS_SLEEPER), 1);
+    EXPECT_EQ(booking_count_waitlisted("T1", RRS_CLASS_SLEEPER), 1);
+
+    rrs_booking_t check_b2;
+    ASSERT_EQ(booking_get(&s2, b2.pnr, &check_b2), RRS_OK);
+    EXPECT_EQ(check_b2.status, RRS_BOOKING_WAITLISTED);
+}
+
 } // namespace
