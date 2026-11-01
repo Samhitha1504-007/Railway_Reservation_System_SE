@@ -14,6 +14,7 @@ file(GLOB_RECURSE RRS_SOURCES CONFIGURE_DEPENDS
 )
 # Modules with their own library target are linked in, not compiled twice.
 list(FILTER RRS_SOURCES EXCLUDE REGEX "/src/inventory/")
+list(FILTER RRS_SOURCES EXCLUDE REGEX "/src/booking/")
 
 # Auth module (C++17, OpenSSL for password hashing). Public header: include/auth.h
 add_library(rrs_auth STATIC
@@ -47,25 +48,35 @@ target_include_directories(rrs_inventory
 )
 target_link_libraries(rrs_inventory PUBLIC rrs_search PRIVATE rrs_auth)
 
+# Booking module (C11). Public header: include/booking.h
+add_library(rrs_booking STATIC
+    src/booking/booking.c
+    src/booking/waitlist.c
+)
+target_include_directories(rrs_booking
+    PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/booking"
+)
+target_link_libraries(rrs_booking PUBLIC rrs_inventory rrs_auth)
+
 add_executable(rrs_app ${RRS_SOURCES})
 target_include_directories(rrs_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     ${CURSES_INCLUDE_DIRS}
 )
-target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_auth rrs_search rrs_inventory)
+target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_auth rrs_search rrs_inventory rrs_booking)
 
 enable_testing()
 find_package(GTest REQUIRED)
 
-add_executable(rrs_tests
-    tests/test_booking.c
-)
-target_include_directories(rrs_tests PRIVATE
+add_executable(rrs_booking_tests tests/test_booking.cpp)
+target_include_directories(rrs_booking_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/booking"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
 )
-set_target_properties(rrs_tests PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(rrs_tests PRIVATE GTest::gtest_main)
-add_test(NAME rrs_tests COMMAND rrs_tests)
+target_link_libraries(rrs_booking_tests PRIVATE rrs_booking rrs_inventory rrs_auth GTest::gtest_main)
+add_test(NAME rrs_booking_tests COMMAND rrs_booking_tests)
 
 add_executable(rrs_inventory_tests tests/test_inventory.cpp)
 target_include_directories(rrs_inventory_tests PRIVATE
