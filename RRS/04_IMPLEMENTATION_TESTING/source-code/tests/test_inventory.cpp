@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "auth.h"
@@ -585,4 +586,139 @@ TEST_F(InventoryTest, RetireUnknownTrainOrNullIdFails) {
 TEST_F(InventoryTest, UnknownOrNullTrainIsNotBookable) {
     EXPECT_FALSE(train_is_bookable("99999"));
     EXPECT_FALSE(train_is_bookable(nullptr));
+}
+
+/* ---------- FR-011: capacity reduction guard ---------- */
+
+namespace {
+
+/* Stand-in for the booking module's confirmed-booking counter. */
+int g_confirmed[RRS_CLASS_COUNT];
+int g_counter_calls;
+std::string g_counter_last_train;
+
+int fake_confirmed_count(const char* train_id, rrs_class_t cls) {
+    ++g_counter_calls;
+    g_counter_last_train = train_id;
+    return std::strcmp(train_id, "12001") == 0 ? g_confirmed[cls] : 0;
+}
+
+class CapacityGuardTest : public InventoryTest {
+protected:
+    void SetUp() override {
+        InventoryTest::SetUp();
+        for (int& c : g_confirmed) c = 0;
+        g_counter_calls = 0;
+        g_counter_last_train.clear();
+        inventory_set_booking_counter(fake_confirmed_count);
+        rrs_train_t t = make_train("12001", good_route(), 100, 50, 20);
+        ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    }
+
+    rrs_status_t set_capacity(int sleeper, int ac3, int ac2) {
+        rrs_train_t t = make_train("12001", good_route(), sleeper, ac3, ac2);
+        return train_update(&admin, &t);
+    }
+
+    void expect_capacity(int sleeper, int ac3, int ac2) {
+        rrs_train_t got;
+        ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+        EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], sleeper);
+        EXPECT_EQ(got.capacity[RRS_CLASS_AC3], ac3);
+        EXPECT_EQ(got.capacity[RRS_CLASS_AC2], ac2);
+    }
+};
+
+}  // namespace
+
+TEST_F(CapacityGuardTest, ReductionBelowConfirmedBookingsIsRejected) {
+    g_confirmed[RRS_CLASS_SLEEPER] = 80;
+    EXPECT_EQ(set_capacity(79, 50, 20), ERR_CAPACITY_CONFLICT);
+    expect_capacity(100, 50, 20);
+}
+
+TEST_F(CapacityGuardTest, ReductionDownToConfirmedBookingsIsAllowed) {
+    g_confirmed[RRS_CLASS_SLEEPER] = 80;
+    EXPECT_EQ(set_capacity(80, 50, 20), RRS_OK);
+    expect_capacity(80, 50, 20);
+}
+
+TEST_F(CapacityGuardTest, EveryClassIsChecked) {
+    g_confirmed[RRS_CLASS_AC3] = 30;
+    EXPECT_EQ(set_capacity(100, 29, 20), ERR_CAPACITY_CONFLICT);
+    g_confirmed[RRS_CLASS_AC3] = 0;
+    g_confirmed[RRS_CLASS_AC2] = 20;
+    EXPECT_EQ(set_capacity(100, 50, 19), ERR_CAPACITY_CONFLICT);
+    expect_capacity(100, 50, 20);
+}
+
+TEST_F(CapacityGuardTest, ConflictRejectsTheWholeUpdateIncludingRouteChanges) {
+    g_confirmed[RRS_CLASS_AC2] = 15;
+    rrs_train_t t = make_train("12001", {halt("NDLS", 600, 600, 0), halt("BSB", 900, 900, 760)},
+                               500, 500, 10);              /* raises two classes, cuts AC2 */
+    EXPECT_EQ(train_update(&admin, &t), ERR_CAPACITY_CONFLICT);
+
+    expect_capacity(100, 50, 20);
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.halt_count, 3);
+    EXPECT_TRUE(searchable("NDLS", "LKO"));
+    EXPECT_FALSE(searchable("NDLS", "BSB"));
+}
+
+TEST_F(CapacityGuardTest, IncreasingCapacityIsAlwaysAllowed) {
+    g_confirmed[RRS_CLASS_SLEEPER] = 100;
+    EXPECT_EQ(set_capacity(300, 50, 20), RRS_OK);
+    expect_capacity(300, 50, 20);
+}
+
+TEST_F(CapacityGuardTest, DroppingAClassToZeroNeedsNoConfirmedBookingsInIt) {
+    EXPECT_EQ(set_capacity(100, 0, 20), RRS_OK);
+    g_confirmed[RRS_CLASS_SLEEPER] = 1;
+    EXPECT_EQ(set_capacity(0, 0, 20), ERR_CAPACITY_CONFLICT);
+    expect_capacity(100, 0, 20);
+}
+
+TEST_F(CapacityGuardTest, RouteEditsAreAllowedWhileBookingsExist) {
+    g_confirmed[RRS_CLASS_SLEEPER] = 100;
+    g_confirmed[RRS_CLASS_AC3] = 50;
+    g_confirmed[RRS_CLASS_AC2] = 20;
+    rrs_train_t t = make_train("12001", {halt("NDLS", 600, 600, 0), halt("BSB", 900, 900, 760)},
+                               100, 50, 20);
+    EXPECT_EQ(train_update(&admin, &t), RRS_OK);
+    EXPECT_TRUE(searchable("NDLS", "BSB"));
+}
+
+TEST_F(CapacityGuardTest, OnlyThisTrainsBookingsCount) {
+    rrs_train_t other = make_train("12002", {halt("BBS", 100, 100, 0), halt("HWH", 400, 400, 440)}, 10, 10, 10);
+    ASSERT_EQ(train_create(&admin, &other), RRS_OK);
+    g_confirmed[RRS_CLASS_SLEEPER] = 100;                 /* belongs to 12001 */
+    other.capacity[RRS_CLASS_SLEEPER] = 5;
+    EXPECT_EQ(train_update(&admin, &other), RRS_OK);
+    EXPECT_EQ(g_counter_last_train, "12002");
+}
+
+TEST_F(CapacityGuardTest, WithoutACounterNothingIsConfirmed) {
+    inventory_set_booking_counter(nullptr);
+    g_confirmed[RRS_CLASS_SLEEPER] = 100;
+    EXPECT_EQ(set_capacity(1, 1, 1), RRS_OK);
+    expect_capacity(1, 1, 1);
+}
+
+TEST_F(CapacityGuardTest, GuardRunsAfterSessionAndInputChecks) {
+    g_confirmed[RRS_CLASS_SLEEPER] = 80;
+    rrs_train_t t = make_train("12001", good_route(), 10, 50, 20);
+    EXPECT_EQ(train_update(&passenger, &t), ERR_FORBIDDEN);
+    EXPECT_EQ(train_update(nullptr, &t), ERR_SESSION_EXPIRED);
+    EXPECT_EQ(g_counter_calls, 0);                        /* never consulted */
+
+    t.halts[1].distance_km = 0;                           /* invalid route and a conflict */
+    EXPECT_EQ(train_update(&admin, &t), ERR_INVALID_INPUT);
+    expect_capacity(100, 50, 20);
+}
+
+TEST_F(CapacityGuardTest, RetireIsNotBlockedByConfirmedBookings) {
+    g_confirmed[RRS_CLASS_SLEEPER] = 100;
+    EXPECT_EQ(train_retire(&admin, "12001"), RRS_OK);
+    expect_capacity(100, 50, 20);                         /* history kept as it was */
 }
