@@ -95,3 +95,8 @@ add_test(NAME rrs_search_tests COMMAND rrs_search_tests)
 add_executable(rrs_fare_eco_tests tests/test_fare_eco.cpp)
 target_link_libraries(rrs_fare_eco_tests PRIVATE rrs_search GTest::gtest_main)
 add_test(NAME rrs_fare_eco_tests COMMAND rrs_fare_eco_tests)
+
+# NFR-001 / FR-017 / NFR-008 performance check (ST-02)
+add_executable(rrs_search_perf_tests tests/test_search_perf.cpp)
+target_link_libraries(rrs_search_perf_tests PRIVATE rrs_search GTest::gtest_main)
+add_test(NAME rrs_search_perf_tests COMMAND rrs_search_perf_tests)
