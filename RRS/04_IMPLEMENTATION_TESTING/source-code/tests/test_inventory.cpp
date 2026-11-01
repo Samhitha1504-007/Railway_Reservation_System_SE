@@ -356,3 +356,138 @@ TEST_F(InventoryTest, GetUnknownTrainOrNullArgumentsFail) {
     EXPECT_EQ(train_get(&admin, nullptr, &got), ERR_INVALID_INPUT);
     EXPECT_EQ(train_get(&admin, "12001", nullptr), ERR_INVALID_INPUT);
 }
+
+/* ---------- FR-008: edit train ---------- */
+
+TEST_F(InventoryTest, AdminEditsCapacitiesAndTheyAreStored) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+
+    t.capacity[RRS_CLASS_SLEEPER] = 150;
+    t.capacity[RRS_CLASS_AC3] = 0;
+    t.capacity[RRS_CLASS_AC2] = 30;
+    ASSERT_EQ(train_update(&admin, &t), RRS_OK);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 150);
+    EXPECT_EQ(got.capacity[RRS_CLASS_AC3], 0);
+    EXPECT_EQ(got.capacity[RRS_CLASS_AC2], 30);
+    EXPECT_EQ(got.status, RRS_TRAIN_ACTIVE);
+    EXPECT_EQ(inventory_train_count_for_tests(), 1);
+}
+
+TEST_F(InventoryTest, EditedRouteReplacesTheOldOneInSearch) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    ASSERT_TRUE(searchable("NDLS", "LKO"));
+    ASSERT_FALSE(searchable("NDLS", "BSB"));
+
+    rrs_train_t edited = make_train("12001", {halt("NDLS", 480, 480, 0), halt("CNB", 720, 725, 440),
+                                              halt("BSB", 900, 900, 760)});
+    ASSERT_EQ(train_update(&admin, &edited), RRS_OK);
+
+    EXPECT_TRUE(searchable("NDLS", "BSB"));
+    EXPECT_TRUE(searchable("NDLS", "CNB"));
+    EXPECT_FALSE(searchable("NDLS", "LKO"));    /* halt removed from the route */
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.halt_count, 3);
+    EXPECT_STREQ(got.halts[2].station, "BSB");
+}
+
+TEST_F(InventoryTest, EditedTimingsShowUpInSearchResults) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+
+    rrs_train_t edited = make_train("12001", {halt("NDLS", 600, 600, 0), halt("CNB", 840, 845, 440),
+                                              halt("LKO", 960, 960, 510)});
+    ASSERT_EQ(train_update(&admin, &edited), RRS_OK);
+
+    rrs_route_list_t out;
+    ASSERT_EQ(search_routes("NDLS", "LKO", kTravelDate, nullptr, &out), RRS_OK);
+    ASSERT_EQ(out.count, 1);
+    EXPECT_EQ(out.routes[0].legs[0].depart_min, 600);
+    EXPECT_EQ(out.routes[0].legs[0].arrive_min, 960);
+}
+
+TEST_F(InventoryTest, EditingOneTrainLeavesOthersUntouched) {
+    rrs_train_t a = make_train("12001", good_route());
+    rrs_train_t b = make_train("12002", {halt("BBS", 100, 100, 0), halt("HWH", 400, 400, 440)}, 10, 10, 10);
+    ASSERT_EQ(train_create(&admin, &a), RRS_OK);
+    ASSERT_EQ(train_create(&admin, &b), RRS_OK);
+
+    a.capacity[RRS_CLASS_SLEEPER] = 5;
+    ASSERT_EQ(train_update(&admin, &a), RRS_OK);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12002", &got), RRS_OK);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 10);
+    EXPECT_TRUE(searchable("BBS", "HWH"));
+    EXPECT_TRUE(searchable("NDLS", "LKO"));
+}
+
+TEST_F(InventoryTest, PassengerCannotEditATrain) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    t.capacity[RRS_CLASS_SLEEPER] = 1;
+    EXPECT_EQ(train_update(&passenger, &t), ERR_FORBIDDEN);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+}
+
+TEST_F(InventoryTest, MissingOrForgedSessionCannotEdit) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    t.capacity[RRS_CLASS_SLEEPER] = 1;
+    EXPECT_EQ(train_update(nullptr, &t), ERR_SESSION_EXPIRED);
+
+    rrs_session_t forged = admin;
+    forged.token[0] = forged.token[0] == 'a' ? 'b' : 'a';
+    EXPECT_EQ(train_update(&forged, &t), ERR_SESSION_EXPIRED);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+}
+
+TEST_F(InventoryTest, EditingAnUnknownTrainFails) {
+    rrs_train_t t = make_train("12001", good_route());
+    EXPECT_EQ(train_update(&admin, &t), ERR_NOT_FOUND);
+    EXPECT_EQ(inventory_train_count_for_tests(), 0);
+}
+
+TEST_F(InventoryTest, InvalidEditIsRejectedAndOldScheduleKept) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+
+    rrs_train_t bad_route = make_train("12001", good_route());
+    bad_route.halts[1].distance_km = 0;
+    EXPECT_EQ(train_update(&admin, &bad_route), ERR_INVALID_INPUT);
+
+    rrs_train_t bad_caps = make_train("12001", good_route(), 0, 0, 0);
+    EXPECT_EQ(train_update(&admin, &bad_caps), ERR_INVALID_INPUT);
+
+    EXPECT_EQ(train_update(&admin, nullptr), ERR_INVALID_INPUT);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.capacity[RRS_CLASS_SLEEPER], 100);
+    EXPECT_EQ(got.halts[1].distance_km, 440);
+    EXPECT_TRUE(searchable("NDLS", "LKO"));
+}
+
+TEST_F(InventoryTest, EditCannotChangeStatus) {
+    rrs_train_t t = make_train("12001", good_route());
+    ASSERT_EQ(train_create(&admin, &t), RRS_OK);
+    t.status = RRS_TRAIN_RETIRED;
+    ASSERT_EQ(train_update(&admin, &t), RRS_OK);
+
+    rrs_train_t got;
+    ASSERT_EQ(train_get(&admin, "12001", &got), RRS_OK);
+    EXPECT_EQ(got.status, RRS_TRAIN_ACTIVE);
+    EXPECT_TRUE(searchable("NDLS", "LKO"));
+}
