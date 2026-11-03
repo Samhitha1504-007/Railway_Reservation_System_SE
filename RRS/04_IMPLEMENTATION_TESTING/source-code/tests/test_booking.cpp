@@ -325,4 +325,177 @@ TEST_F(BookingTest, WaitlistPromoteDoesNotOverAllocateWhenCapacityFull) {
     EXPECT_EQ(check_b2.status, RRS_BOOKING_WAITLISTED);
 }
 
+TEST_F(BookingTest, WaitlistEnqueuePreservesFcfsOrder) {
+    /* Capacity for AC2 is 20 */
+    rrs_train_t cap_train = make_train("CAP2", 10, 10, 2);
+    ASSERT_EQ(train_create(&admin_session, &cap_train), RRS_OK);
+
+    ASSERT_EQ(auth_register("p1@rrs.test", "Pass1Pass1", "P One"), RRS_OK);
+    rrs_session_t s1;
+    ASSERT_EQ(auth_login("p1@rrs.test", "Pass1Pass1", &s1), RRS_OK);
+
+    ASSERT_EQ(auth_register("p2@rrs.test", "Pass2Pass2", "P Two"), RRS_OK);
+    rrs_session_t s2;
+    ASSERT_EQ(auth_login("p2@rrs.test", "Pass2Pass2", &s2), RRS_OK);
+
+    ASSERT_EQ(auth_register("p3@rrs.test", "Pass3Pass3", "P Three"), RRS_OK);
+    rrs_session_t s3;
+    ASSERT_EQ(auth_login("p3@rrs.test", "Pass3Pass3", &s3), RRS_OK);
+
+    ASSERT_EQ(auth_register("p4@rrs.test", "Pass4Pass4", "P Four"), RRS_OK);
+    rrs_session_t s4;
+    ASSERT_EQ(auth_login("p4@rrs.test", "Pass4Pass4", &s4), RRS_OK);
+
+    rrs_booking_t b1, b2, b3, b4;
+    ASSERT_EQ(booking_create(&s1, "CAP2", RRS_CLASS_AC2, 500.0, "k1", &b1), RRS_OK);
+    ASSERT_EQ(booking_create(&s2, "CAP2", RRS_CLASS_AC2, 500.0, "k2", &b2), RRS_OK);
+    ASSERT_EQ(booking_create(&s3, "CAP2", RRS_CLASS_AC2, 500.0, "k3", &b3), RRS_OK);
+    ASSERT_EQ(booking_create(&s4, "CAP2", RRS_CLASS_AC2, 500.0, "k4", &b4), RRS_OK);
+
+    /* b1, b2 are CONFIRMED */
+    EXPECT_EQ(b1.status, RRS_BOOKING_CONFIRMED);
+    EXPECT_EQ(b2.status, RRS_BOOKING_CONFIRMED);
+
+    /* b3, b4 are WAITLISTED in FCFS order (FR-020) */
+    EXPECT_EQ(b3.status, RRS_BOOKING_WAITLISTED);
+    EXPECT_EQ(b3.waitlist_position, 1);
+
+    EXPECT_EQ(b4.status, RRS_BOOKING_WAITLISTED);
+    EXPECT_EQ(b4.waitlist_position, 2);
+
+    EXPECT_EQ(booking_count_confirmed("CAP2", RRS_CLASS_AC2), 2);
+    EXPECT_EQ(booking_count_waitlisted("CAP2", RRS_CLASS_AC2), 2);
+}
+
+TEST_F(BookingTest, CancelWaitlistedTicketRemovesFromQueueAndShiftsPositions) {
+    rrs_train_t cap_train = make_train("CAP3", 10, 10, 1);
+    ASSERT_EQ(train_create(&admin_session, &cap_train), RRS_OK);
+
+    ASSERT_EQ(auth_register("w1@rrs.test", "Pass1Pass1", "W One"), RRS_OK);
+    rrs_session_t s1;
+    ASSERT_EQ(auth_login("w1@rrs.test", "Pass1Pass1", &s1), RRS_OK);
+
+    ASSERT_EQ(auth_register("w2@rrs.test", "Pass2Pass2", "W Two"), RRS_OK);
+    rrs_session_t s2;
+    ASSERT_EQ(auth_login("w2@rrs.test", "Pass2Pass2", &s2), RRS_OK);
+
+    ASSERT_EQ(auth_register("w3@rrs.test", "Pass3Pass3", "W Three"), RRS_OK);
+    rrs_session_t s3;
+    ASSERT_EQ(auth_login("w3@rrs.test", "Pass3Pass3", &s3), RRS_OK);
+
+    rrs_booking_t b1, b2, b3;
+    ASSERT_EQ(booking_create(&s1, "CAP3", RRS_CLASS_AC2, 500.0, "k1", &b1), RRS_OK); // Confirmed
+    ASSERT_EQ(booking_create(&s2, "CAP3", RRS_CLASS_AC2, 500.0, "k2", &b2), RRS_OK); // Waitlist 1
+    ASSERT_EQ(booking_create(&s3, "CAP3", RRS_CLASS_AC2, 500.0, "k3", &b3), RRS_OK); // Waitlist 2
+
+    EXPECT_EQ(booking_count_waitlisted("CAP3", RRS_CLASS_AC2), 2);
+
+    /* w2 (waitlist position 1) cancels ticket (FR-021) */
+    ASSERT_EQ(booking_cancel(&s2, b2.pnr), RRS_OK);
+
+    rrs_booking_t query_b2;
+    ASSERT_EQ(booking_get(&s2, b2.pnr, &query_b2), RRS_OK);
+    EXPECT_EQ(query_b2.status, RRS_BOOKING_CANCELLED);
+    EXPECT_EQ(query_b2.waitlist_position, 0);
+
+    /* w3 should now be shifted to waitlist position 1 */
+    rrs_booking_t query_b3;
+    ASSERT_EQ(booking_get(&s3, b3.pnr, &query_b3), RRS_OK);
+    EXPECT_EQ(query_b3.status, RRS_BOOKING_WAITLISTED);
+    EXPECT_EQ(query_b3.waitlist_position, 1);
+    EXPECT_EQ(booking_count_waitlisted("CAP3", RRS_CLASS_AC2), 1);
+}
+
+TEST_F(BookingTest, CancelTicketPermissionsAndIdempotency) {
+    rrs_booking_t b;
+    ASSERT_EQ(booking_create(&passenger_session, "EXP101", RRS_CLASS_AC3, 850.0, "perm-k", &b), RRS_OK);
+
+    /* Other passenger cannot cancel */
+    ASSERT_EQ(auth_register("other@rrs.test", "PassOther1", "Other"), RRS_OK);
+    rrs_session_t other_s;
+    ASSERT_EQ(auth_login("other@rrs.test", "PassOther1", &other_s), RRS_OK);
+    EXPECT_EQ(booking_cancel(&other_s, b.pnr), ERR_FORBIDDEN);
+
+    /* Non-existent PNR */
+    EXPECT_EQ(booking_cancel(&passenger_session, "PNR999999999"), ERR_NOT_FOUND);
+
+    /* Invalid input */
+    EXPECT_EQ(booking_cancel(nullptr, b.pnr), ERR_INVALID_INPUT);
+    EXPECT_EQ(booking_cancel(&passenger_session, nullptr), ERR_INVALID_INPUT);
+
+    /* Successful cancellation by owner */
+    EXPECT_EQ(booking_cancel(&passenger_session, b.pnr), RRS_OK);
+
+    /* Subsequent cancellation is idempotent and succeeds */
+    EXPECT_EQ(booking_cancel(&passenger_session, b.pnr), RRS_OK);
+}
+
+TEST_F(BookingTest, PassengerBookingListRetrieval) {
+    rrs_booking_t b1, b2;
+    ASSERT_EQ(booking_create(&passenger_session, "EXP101", RRS_CLASS_SLEEPER, 300.0, "list-1", &b1), RRS_OK);
+    ASSERT_EQ(booking_create(&passenger_session, "EXP101", RRS_CLASS_AC3, 800.0, "list-2", &b2), RRS_OK);
+
+    rrs_booking_t list[10];
+    int count = 0;
+    EXPECT_EQ(booking_list_by_passenger(&passenger_session, list, 10, &count), RRS_OK);
+    EXPECT_EQ(count, 2);
+}
+
+TEST_F(BookingTest, CancelThenPromoteNeverExceedsCapacity) {
+    /* Create train with capacity: 2 seats in Sleeper */
+    rrs_train_t t = make_train("CAP2T", 2, 0, 0);
+    ASSERT_EQ(train_create(&admin_session, &t), RRS_OK);
+
+    ASSERT_EQ(auth_register("cp1@rrs.test", "Pass1234!", "CP One"), RRS_OK);
+    rrs_session_t s1;
+    ASSERT_EQ(auth_login("cp1@rrs.test", "Pass1234!", &s1), RRS_OK);
+
+    ASSERT_EQ(auth_register("cp2@rrs.test", "Pass1234!", "CP Two"), RRS_OK);
+    rrs_session_t s2;
+    ASSERT_EQ(auth_login("cp2@rrs.test", "Pass1234!", &s2), RRS_OK);
+
+    ASSERT_EQ(auth_register("cp3@rrs.test", "Pass3Pass3", "CP Three"), RRS_OK);
+    rrs_session_t s3;
+    ASSERT_EQ(auth_login("cp3@rrs.test", "Pass3Pass3", &s3), RRS_OK);
+
+    ASSERT_EQ(auth_register("cp4@rrs.test", "Pass4Pass4", "CP Four"), RRS_OK);
+    rrs_session_t s4;
+    ASSERT_EQ(auth_login("cp4@rrs.test", "Pass4Pass4", &s4), RRS_OK);
+
+    rrs_booking_t b1, b2, b3, b4;
+    ASSERT_EQ(booking_create(&s1, "CAP2T", RRS_CLASS_SLEEPER, 400.0, "k1", &b1), RRS_OK);
+    ASSERT_EQ(booking_create(&s2, "CAP2T", RRS_CLASS_SLEEPER, 400.0, "k2", &b2), RRS_OK);
+    ASSERT_EQ(booking_create(&s3, "CAP2T", RRS_CLASS_SLEEPER, 400.0, "k3", &b3), RRS_OK);
+    ASSERT_EQ(booking_create(&s4, "CAP2T", RRS_CLASS_SLEEPER, 400.0, "k4", &b4), RRS_OK);
+
+    EXPECT_EQ(b1.status, RRS_BOOKING_CONFIRMED);
+    EXPECT_EQ(b2.status, RRS_BOOKING_CONFIRMED);
+    EXPECT_EQ(b3.status, RRS_BOOKING_WAITLISTED);
+    EXPECT_EQ(b4.status, RRS_BOOKING_WAITLISTED);
+
+    EXPECT_EQ(booking_count_confirmed("CAP2T", RRS_CLASS_SLEEPER), 2);
+    EXPECT_EQ(booking_count_waitlisted("CAP2T", RRS_CLASS_SLEEPER), 2);
+
+    /* Cancel 1 confirmed booking -> b1 cancelled, b3 auto-promoted to confirmed */
+    ASSERT_EQ(booking_cancel(&s1, b1.pnr), RRS_OK);
+
+    /* Confirmed count must be exactly 2 (capacity limit not exceeded) */
+    EXPECT_EQ(booking_count_confirmed("CAP2T", RRS_CLASS_SLEEPER), 2);
+    EXPECT_EQ(booking_count_waitlisted("CAP2T", RRS_CLASS_SLEEPER), 1);
+
+    rrs_booking_t chk3, chk4;
+    ASSERT_EQ(booking_get(&s3, b3.pnr, &chk3), RRS_OK);
+    EXPECT_EQ(chk3.status, RRS_BOOKING_CONFIRMED);
+    EXPECT_EQ(chk3.waitlist_position, 0);
+
+    ASSERT_EQ(booking_get(&s4, b4.pnr, &chk4), RRS_OK);
+    EXPECT_EQ(chk4.status, RRS_BOOKING_WAITLISTED);
+    EXPECT_EQ(chk4.waitlist_position, 1);
+
+    /* Calling waitlist_promote directly when capacity is full must not over-allocate */
+    EXPECT_EQ(waitlist_promote("CAP2T", RRS_CLASS_SLEEPER), RRS_OK);
+    EXPECT_EQ(booking_count_confirmed("CAP2T", RRS_CLASS_SLEEPER), 2);
+    EXPECT_EQ(booking_count_waitlisted("CAP2T", RRS_CLASS_SLEEPER), 1);
+}
+
 } // namespace
