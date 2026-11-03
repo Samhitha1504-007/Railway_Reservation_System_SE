@@ -1,10 +1,11 @@
 /*
- * rrs_demo.cpp - console walkthrough of the Sprint 1 features using the real
- * auth, inventory and search modules (no TUI yet).
+ * rrs_demo.cpp - console walkthrough of the features using the real auth,
+ * inventory and search modules (no TUI yet).
  * Build target: rrs_demo. Run: ./build/rrs_demo
  */
 #include "auth.h"
 #include "auth_internal.h"
+#include "fare_eco.h"
 #include "inventory.h"
 #include "search.h"
 
@@ -77,29 +78,38 @@ rrs_train_t train(const char* id, std::initializer_list<rrs_halt_t> halts, int s
 
 int hm(int h, int m) { return h * 60 + m; }
 
-void search(const char* from, const char* to, const char* explain) {
-    char title[64];
-    std::snprintf(title, sizeof title, "Search %s -> %s on %s", from, to, kDate);
+const char* sort_name(rrs_sort_key_t key) {
+    return key == RRS_SORT_FARE ? "cheapest first" : key == RRS_SORT_ECO ? "greenest first" : "fastest first";
+}
+
+/* Search, then price, score and sort the options (AC 3-Tier). */
+void search(const char* from, const char* to, const char* explain,
+            rrs_sort_key_t key = RRS_SORT_TIME, rrs_concession_t concession = RRS_CONCESSION_NONE) {
+    char title[96];
+    std::snprintf(title, sizeof title, "Search %s -> %s on %s, AC 3-Tier, %s%s", from, to, kDate,
+                  sort_name(key), concession == RRS_CONCESSION_SENIOR ? ", senior citizen" : "");
     heading(title, explain);
-    rrs_route_list_t out;
-    rrs_status_t st = search_routes(from, to, kDate, nullptr, &out);
+    rrs_route_list_t found;
+    rrs_status_t st = search_routes(from, to, kDate, nullptr, &found);
     if (st != RRS_OK) {
         std::printf("  %s\n", status_name(st));
         return;
     }
+    rrs_option_list_t out;
+    search_rank(&found, RRS_CLASS_AC3, concession, key, nullptr, &out);
     for (int i = 0; i < out.count; ++i) {
-        const rrs_route_t& r = out.routes[i];
+        const rrs_route_t& r = out.options[i].route;
         char dep[16], arr[16];
         fmt_time(r.legs[0].depart_min, dep, sizeof dep);
         fmt_time(r.legs[r.leg_count - 1].arrive_min, arr, sizeof arr);
-        std::printf("  %d. %-9s -> %-9s %2dh%02dm  %5d km  ", i + 1, dep, arr,
-                    r.total_minutes / 60, r.total_minutes % 60, r.total_distance_km);
+        std::printf("  %d. %-5s -> %-8s %2dh%02dm %5d km   Rs %5.0f   %5.1f kg CO2 (eco %d)   ", i + 1,
+                    dep, arr, r.total_minutes / 60, r.total_minutes % 60, r.total_distance_km,
+                    out.options[i].fare, out.options[i].eco.co2_kg, out.options[i].eco.score);
         if (r.leg_count == 1) {
-            std::printf("direct, train %s\n", r.legs[0].train_id);
+            std::printf("direct %s\n", r.legs[0].train_id);
         } else {
-            std::printf("%d trains:", r.leg_count);
             for (int l = 0; l < r.leg_count; ++l)
-                std::printf(" %s %s->%s", r.legs[l].train_id, r.legs[l].from, r.legs[l].to);
+                std::printf("%s%s %s->%s", l ? ", " : "", r.legs[l].train_id, r.legs[l].from, r.legs[l].to);
             std::printf("\n");
         }
     }
@@ -108,7 +118,7 @@ void search(const char* from, const char* to, const char* explain) {
 }  // namespace
 
 int main() {
-    std::printf("Railway Reservation System - Sprint 1 console demo\n");
+    std::printf("Railway Reservation System - console demo\n");
 
     heading("Register passengers", "Riya signs up; then we try a duplicate email, a bad email and a weak password.");
     step("riya@example.com", auth_register("riya@example.com", "Passw0rdOK", "Riya"));
@@ -147,6 +157,12 @@ int main() {
 
     search("SBC", "NDLS", "Bengaluru to New Delhi: two direct trains, fastest first.");
     search("SBC", "LKO", "Bengaluru to Lucknow: no direct train, so the search changes at New Delhi.");
+    search("SBC", "NDLS", "Same trip sorted by fare: the fare depends on distance and class.",
+           RRS_SORT_FARE);
+    search("SBC", "NDLS", "A senior citizen gets 40% off the distance charge.",
+           RRS_SORT_FARE, RRS_CONCESSION_SENIOR);
+    search("SBC", "NDLS", "Greenest first: lowest CO2 per passenger, compared with driving.",
+           RRS_SORT_ECO);
 
     heading("Admin retires 12627", "The admin takes train 12627 out of service.");
     step("retire 12627", train_retire(&admin, "12627"));
@@ -155,6 +171,6 @@ int main() {
     heading("Log out", "Riya logs out; her old session should stop working.");
     step("riya logs out", auth_logout(&passenger));
     step("riya tries to view a train afterwards", train_get(&passenger, "12627", &t4));
-    std::printf("\nEnd of Sprint 1 demo.\n");
+    std::printf("\nEnd of demo.\n");
     return 0;
 }

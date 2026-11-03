@@ -32,6 +32,7 @@ target_link_libraries(rrs_auth PUBLIC OpenSSL::Crypto)
 add_library(rrs_search STATIC
     src/search/graph.cpp
     src/search/search.cpp
+    src/search/fare_eco.cpp
 )
 target_include_directories(rrs_search
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -90,3 +91,12 @@ add_test(NAME rrs_auth_tests COMMAND rrs_auth_tests)
 add_executable(rrs_search_tests tests/test_search.cpp)
 target_link_libraries(rrs_search_tests PRIVATE rrs_search GTest::gtest_main)
 add_test(NAME rrs_search_tests COMMAND rrs_search_tests)
+
+add_executable(rrs_fare_eco_tests tests/test_fare_eco.cpp)
+target_link_libraries(rrs_fare_eco_tests PRIVATE rrs_search GTest::gtest_main)
+add_test(NAME rrs_fare_eco_tests COMMAND rrs_fare_eco_tests)
+
+# NFR-001 / FR-017 / NFR-008 performance check (ST-02)
+add_executable(rrs_search_perf_tests tests/test_search_perf.cpp)
+target_link_libraries(rrs_search_perf_tests PRIVATE rrs_search GTest::gtest_main)
+add_test(NAME rrs_search_perf_tests COMMAND rrs_search_perf_tests)
