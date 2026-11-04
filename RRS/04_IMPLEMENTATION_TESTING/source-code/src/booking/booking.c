@@ -8,6 +8,43 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+static CRITICAL_SECTION g_booking_cs;
+static LONG             g_booking_cs_inited = 0;
+
+static void booking_lock(void)
+{
+    if (InterlockedCompareExchange(&g_booking_cs_inited, 1, 0) == 0) {
+        InitializeCriticalSection(&g_booking_cs);
+        InterlockedExchange(&g_booking_cs_inited, 2);
+    } else {
+        while (InterlockedCompareExchange(&g_booking_cs_inited, 2, 2) != 2) {
+            Sleep(0);
+        }
+    }
+    EnterCriticalSection(&g_booking_cs);
+}
+
+static void booking_unlock(void)
+{
+    LeaveCriticalSection(&g_booking_cs);
+}
+#define BOOKING_LOCK()   booking_lock()
+#define BOOKING_UNLOCK() booking_unlock()
+#else
+#include <pthread.h>
+static pthread_mutex_t g_booking_lock = PTHREAD_MUTEX_INITIALIZER;
+#define BOOKING_LOCK()   pthread_mutex_lock(&g_booking_lock)
+#define BOOKING_UNLOCK() pthread_mutex_unlock(&g_booking_lock)
+#endif
+
 static rrs_booking_t g_bookings[RRS_MAX_BOOKINGS];
 static int           g_booking_count = 0;
 static unsigned int  g_pnr_seed = 100000000;
@@ -67,6 +104,72 @@ static int execute_mock_payment(const char* passenger_id, double amount)
     return (amount > 0.0) ? 1 : 0;
 }
 
+static int booking_count_confirmed_locked(const char* train_id, rrs_class_t cls)
+{
+    int count = 0;
+    int i;
+
+    if (!train_id || cls < 0 || cls >= RRS_CLASS_COUNT) return 0;
+
+    for (i = 0; i < g_booking_count; ++i) {
+        if (g_bookings[i].status == RRS_BOOKING_CONFIRMED &&
+            g_bookings[i].travel_class == cls &&
+            strcmp(g_bookings[i].train_id, train_id) == 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static void sync_waitlist_positions_locked(const char* train_id, rrs_class_t cls)
+{
+    int i;
+    for (i = 0; i < g_booking_count; ++i) {
+        if (g_bookings[i].status == RRS_BOOKING_WAITLISTED &&
+            g_bookings[i].travel_class == cls &&
+            strcmp(g_bookings[i].train_id, train_id) == 0) {
+            g_bookings[i].waitlist_position =
+                waitlist_internal_get_position(train_id, cls, g_bookings[i].pnr);
+        }
+    }
+}
+
+static rrs_status_t waitlist_promote_locked(const char* train_id, rrs_class_t cls)
+{
+    const char* head_pnr;
+    int cap;
+    int i;
+
+    if (!train_id || cls < 0 || cls >= RRS_CLASS_COUNT) {
+        return ERR_INVALID_INPUT;
+    }
+
+    cap = train_get_capacity(train_id, cls);
+    if (cap < 0) {
+        return ERR_NOT_FOUND;
+    }
+
+    if (booking_count_confirmed_locked(train_id, cls) >= cap) {
+        return RRS_OK;
+    }
+
+    head_pnr = waitlist_internal_pop_head(train_id, cls);
+    if (!head_pnr) {
+        return RRS_OK;
+    }
+
+    for (i = 0; i < g_booking_count; ++i) {
+        if (strcmp(g_bookings[i].pnr, head_pnr) == 0) {
+            g_bookings[i].status = RRS_BOOKING_CONFIRMED;
+            g_bookings[i].waitlist_position = 0;
+            sync_waitlist_positions_locked(train_id, cls);
+            return RRS_OK;
+        }
+    }
+
+    return ERR_NOT_FOUND;
+}
+
 rrs_status_t booking_create(const rrs_session_t* session,
                             const char* train_id,
                             rrs_class_t travel_class,
@@ -108,12 +211,15 @@ rrs_status_t booking_create(const rrs_session_t* session,
         return auth_st;
     }
 
+    BOOKING_LOCK();
+
     /* Idempotency check (FR-024): avoid duplicate on retry */
     if (idempotency_key && idempotency_key[0] != '\0') {
         for (i = 0; i < g_booking_count; ++i) {
             if (strcmp(g_bookings[i].passenger_id, session->user_id) == 0 &&
                 strcmp(g_bookings[i].idempotency_key, idempotency_key) == 0) {
                 *out = g_bookings[i];
+                BOOKING_UNLOCK();
                 return RRS_OK;
             }
         }
@@ -121,31 +227,36 @@ rrs_status_t booking_create(const rrs_session_t* session,
 
     /* Check train existence and bookability */
     if (!train_is_bookable(train_id)) {
+        BOOKING_UNLOCK();
         return ERR_NOT_FOUND;
     }
 
     /* Retrieve train capacity details */
     memset(&train, 0, sizeof(train));
     if (train_get(session, train_id, &train) != RRS_OK) {
+        BOOKING_UNLOCK();
         return ERR_NOT_FOUND;
     }
 
     if (train.capacity[travel_class] <= 0) {
+        BOOKING_UNLOCK();
         return ERR_INVALID_INPUT;
     }
 
     /* Mock payment authorization (FR-018, FR-019) */
     if (!execute_mock_payment(session->user_id, fare_amount)) {
+        BOOKING_UNLOCK();
         return ERR_PAYMENT_FAILED;
     }
 
     /* Check capacity vs confirmed count */
-    confirmed = booking_count_confirmed(train_id, travel_class);
+    confirmed = booking_count_confirmed_locked(train_id, travel_class);
     if (confirmed >= train.capacity[travel_class]) {
         is_waitlist = 1;
     }
 
     if (g_booking_count >= RRS_MAX_BOOKINGS) {
+        BOOKING_UNLOCK();
         return ERR_CAPACITY_CONFLICT;
     }
 
@@ -154,6 +265,7 @@ rrs_status_t booking_create(const rrs_session_t* session,
     if (is_waitlist) {
         wait_pos = waitlist_internal_enqueue(train_id, travel_class, pnr);
         if (wait_pos <= 0) {
+            BOOKING_UNLOCK();
             return ERR_CAPACITY_CONFLICT;
         }
     }
@@ -176,6 +288,7 @@ rrs_status_t booking_create(const rrs_session_t* session,
     *out = g_bookings[g_booking_count];
     g_booking_count++;
 
+    BOOKING_UNLOCK();
     return RRS_OK;
 }
 
@@ -202,9 +315,11 @@ rrs_status_t booking_get(const rrs_session_t* session,
                    : ERR_SESSION_EXPIRED;
     }
 
+    BOOKING_LOCK();
     for (i = 0; i < g_booking_count; ++i) {
         if (strcmp(g_bookings[i].pnr, pnr) == 0) {
             if (auth_admin != RRS_OK && strcmp(session->user_id, g_bookings[i].passenger_id) != 0) {
+                BOOKING_UNLOCK();
                 return ERR_FORBIDDEN;
             }
             if (g_bookings[i].status == RRS_BOOKING_WAITLISTED) {
@@ -214,24 +329,13 @@ rrs_status_t booking_get(const rrs_session_t* session,
                                                    g_bookings[i].pnr);
             }
             *out = g_bookings[i];
+            BOOKING_UNLOCK();
             return RRS_OK;
         }
     }
+    BOOKING_UNLOCK();
 
     return ERR_NOT_FOUND;
-}
-
-static void sync_waitlist_positions(const char* train_id, rrs_class_t cls)
-{
-    int i;
-    for (i = 0; i < g_booking_count; ++i) {
-        if (g_bookings[i].status == RRS_BOOKING_WAITLISTED &&
-            g_bookings[i].travel_class == cls &&
-            strcmp(g_bookings[i].train_id, train_id) == 0) {
-            g_bookings[i].waitlist_position =
-                waitlist_internal_get_position(train_id, cls, g_bookings[i].pnr);
-        }
-    }
 }
 
 rrs_status_t booking_list_by_passenger(const rrs_session_t* session,
@@ -253,6 +357,7 @@ rrs_status_t booking_list_by_passenger(const rrs_session_t* session,
         return auth_st;
     }
 
+    BOOKING_LOCK();
     for (i = 0; i < g_booking_count && found < max_count; ++i) {
         if (strcmp(g_bookings[i].passenger_id, session->user_id) == 0) {
             if (g_bookings[i].status == RRS_BOOKING_WAITLISTED) {
@@ -265,6 +370,7 @@ rrs_status_t booking_list_by_passenger(const rrs_session_t* session,
             found++;
         }
     }
+    BOOKING_UNLOCK();
 
     *actual_count = found;
     return RRS_OK;
@@ -287,13 +393,16 @@ rrs_status_t booking_cancel(const rrs_session_t* session, const char* pnr)
                    : ERR_SESSION_EXPIRED;
     }
 
+    BOOKING_LOCK();
     for (i = 0; i < g_booking_count; ++i) {
         if (strcmp(g_bookings[i].pnr, pnr) == 0) {
             if (auth_admin != RRS_OK && strcmp(session->user_id, g_bookings[i].passenger_id) != 0) {
+                BOOKING_UNLOCK();
                 return ERR_FORBIDDEN;
             }
 
             if (g_bookings[i].status == RRS_BOOKING_CANCELLED) {
+                BOOKING_UNLOCK();
                 return RRS_OK;
             }
 
@@ -303,99 +412,78 @@ rrs_status_t booking_cancel(const rrs_session_t* session, const char* pnr)
                                          g_bookings[i].pnr);
                 g_bookings[i].status = RRS_BOOKING_CANCELLED;
                 g_bookings[i].waitlist_position = 0;
-                sync_waitlist_positions(g_bookings[i].train_id, g_bookings[i].travel_class);
+                sync_waitlist_positions_locked(g_bookings[i].train_id, g_bookings[i].travel_class);
             } else if (g_bookings[i].status == RRS_BOOKING_CONFIRMED) {
                 g_bookings[i].status = RRS_BOOKING_CANCELLED;
                 /* Auto-promote next waitlisted passenger (FR-022) */
-                waitlist_promote(g_bookings[i].train_id, g_bookings[i].travel_class);
+                waitlist_promote_locked(g_bookings[i].train_id, g_bookings[i].travel_class);
             }
 
+            BOOKING_UNLOCK();
             return RRS_OK;
         }
     }
+    BOOKING_UNLOCK();
 
     return ERR_NOT_FOUND;
 }
 
 rrs_status_t waitlist_promote(const char* train_id, rrs_class_t cls)
 {
-    const char* head_pnr;
-    int cap;
-    int i;
-
-    if (!train_id || cls < 0 || cls >= RRS_CLASS_COUNT) {
-        return ERR_INVALID_INPUT;
-    }
-
-    cap = train_get_capacity(train_id, cls);
-    if (cap < 0) {
-        return ERR_NOT_FOUND;
-    }
-
-    if (booking_count_confirmed(train_id, cls) >= cap) {
-        return RRS_OK;
-    }
-
-    head_pnr = waitlist_internal_pop_head(train_id, cls);
-    if (!head_pnr) {
-        return RRS_OK;
-    }
-
-    for (i = 0; i < g_booking_count; ++i) {
-        if (strcmp(g_bookings[i].pnr, head_pnr) == 0) {
-            g_bookings[i].status = RRS_BOOKING_CONFIRMED;
-            g_bookings[i].waitlist_position = 0;
-            sync_waitlist_positions(train_id, cls);
-            return RRS_OK;
-        }
-    }
-
-    return ERR_NOT_FOUND;
+    rrs_status_t st;
+    BOOKING_LOCK();
+    st = waitlist_promote_locked(train_id, cls);
+    BOOKING_UNLOCK();
+    return st;
 }
 
 int booking_count_confirmed(const char* train_id, rrs_class_t cls)
 {
-    int count = 0;
-    int i;
-
-    if (!train_id || cls < 0 || cls >= RRS_CLASS_COUNT) return 0;
-
-    for (i = 0; i < g_booking_count; ++i) {
-        if (g_bookings[i].status == RRS_BOOKING_CONFIRMED &&
-            g_bookings[i].travel_class == cls &&
-            strcmp(g_bookings[i].train_id, train_id) == 0) {
-            count++;
-        }
-    }
+    int count;
+    BOOKING_LOCK();
+    count = booking_count_confirmed_locked(train_id, cls);
+    BOOKING_UNLOCK();
     return count;
 }
 
 int booking_count_waitlisted(const char* train_id, rrs_class_t cls)
 {
-    return waitlist_internal_count(train_id, cls);
+    int count;
+    BOOKING_LOCK();
+    count = waitlist_internal_count(train_id, cls);
+    BOOKING_UNLOCK();
+    return count;
 }
 
 void booking_set_payment_gateway(rrs_payment_gateway_fn fn)
 {
+    BOOKING_LOCK();
     g_payment_gateway = fn;
+    BOOKING_UNLOCK();
 }
 
 void booking_set_mock_payment_result(int result)
 {
+    BOOKING_LOCK();
     g_mock_payment_override = result;
+    BOOKING_UNLOCK();
 }
 
 void booking_init(void)
 {
+    BOOKING_LOCK();
+    BOOKING_UNLOCK();
     inventory_set_booking_counter(booking_count_confirmed);
 }
 
 void booking_clear(void)
 {
+    BOOKING_LOCK();
     memset(g_bookings, 0, sizeof(g_bookings));
     g_booking_count = 0;
     g_pnr_seed = 100000000;
     g_mock_payment_override = -1;
     g_payment_gateway = NULL;
     waitlist_internal_clear();
+    BOOKING_UNLOCK();
 }
