@@ -2,6 +2,7 @@
 #include "auth_internal.h"
 #include "password.h"
 #include "session.h"
+#include "audit.h"
 
 #include <openssl/rand.h>
 
@@ -134,10 +135,14 @@ extern "C" rrs_status_t auth_login(const char* email, const char* password, rrs_
         static std::string dummy;
         if (dummy.empty()) rrs::password_hash("Dummy-Password-1", dummy);
         rrs::password_verify(password, dummy);
+        audit_event("LOGIN_FAILED", email, "auth_login", ERR_AUTH_FAILED);
         return ERR_AUTH_FAILED;
     }
 
-    if (!rrs::password_verify(password, u->password_hash)) return ERR_AUTH_FAILED;
+    if (!rrs::password_verify(password, u->password_hash)) {
+        audit_event("LOGIN_FAILED", email, "auth_login", ERR_AUTH_FAILED);
+        return ERR_AUTH_FAILED;
+    }
 
     if (!rrs::session_create(u->user_id, u->role, *out)) {
         std::memset(out, 0, sizeof *out);
@@ -159,8 +164,10 @@ extern "C" rrs_status_t auth_profile_get(const rrs_session_t* session, rrs_profi
     std::memset(out, 0, sizeof *out);
 
     rrs::SessionInfo info;
-    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid)
+    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid) {
+        audit_event("SESSION_REJECTED", "unknown", "auth_profile_get", ERR_SESSION_EXPIRED);
         return ERR_SESSION_EXPIRED;
+    }
     const UserRecord* u = find_user_by_id(info.user_id);
     if (!u) return ERR_NOT_FOUND;
 
@@ -174,8 +181,10 @@ extern "C" rrs_status_t auth_profile_get(const rrs_session_t* session, rrs_profi
 extern "C" rrs_status_t auth_profile_update(const rrs_session_t* session, const char* new_name,
                                             const char* new_email) {
     rrs::SessionInfo info;
-    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid)
+    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid) {
+        audit_event("SESSION_REJECTED", "unknown", "auth_profile_update", ERR_SESSION_EXPIRED);
         return ERR_SESSION_EXPIRED;
+    }
     if (!new_name && !new_email) return ERR_INVALID_INPUT;
 
     UserRecord* u = find_user_by_id(info.user_id);
@@ -200,7 +209,9 @@ extern "C" rrs_status_t auth_profile_update(const rrs_session_t* session, const 
 }
 
 extern "C" rrs_status_t auth_logout(const rrs_session_t* session) {
-    return rrs::session_destroy(session) ? RRS_OK : ERR_SESSION_EXPIRED;
+    if (rrs::session_destroy(session)) return RRS_OK;
+    audit_event("SESSION_REJECTED", "unknown", "auth_logout", ERR_SESSION_EXPIRED);
+    return ERR_SESSION_EXPIRED;
 }
 
 void auth_reset_for_tests(void) {
