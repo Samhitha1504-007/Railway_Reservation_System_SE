@@ -112,3 +112,13 @@ add_test(NAME rrs_fare_eco_tests COMMAND rrs_fare_eco_tests)
 add_executable(rrs_search_perf_tests tests/test_search_perf.cpp)
 target_link_libraries(rrs_search_perf_tests PRIVATE rrs_search GTest::gtest_main)
 add_test(NAME rrs_search_perf_tests COMMAND rrs_search_perf_tests)
+
+# Security tests (SEC-003, SEC-004, SEC-006): every .cpp in tests/security/ is built in.
+file(GLOB RRS_SECURITY_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/security/*.cpp")
+add_executable(rrs_security_tests ${RRS_SECURITY_TESTS})
+target_include_directories(rrs_security_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/audit"
+)
+target_link_libraries(rrs_security_tests PRIVATE rrs_auth GTest::gtest_main)
+add_test(NAME rrs_security_tests COMMAND rrs_security_tests)
