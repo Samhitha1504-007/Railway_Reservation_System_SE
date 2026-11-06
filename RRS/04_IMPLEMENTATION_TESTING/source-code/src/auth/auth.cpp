@@ -58,14 +58,38 @@ std::string normalize_email(const std::string& email) {
 
 bool is_valid_email(const std::string& email) {
     if (email.empty() || email.size() > 100) return false;
-    if (email.find_first_of(" \t\r\n") != std::string::npos) return false;
+
     size_t at = email.find('@');
     if (at == std::string::npos || at == 0) return false;
     if (email.find('@', at + 1) != std::string::npos) return false;
-    std::string domain = email.substr(at + 1);
-    size_t dot = domain.find('.');
-    if (dot == std::string::npos || dot == 0 || domain.back() == '.') return false;
-    return true;
+    const std::string local = email.substr(0, at);
+    const std::string domain = email.substr(at + 1);
+
+    /* Allow-list, plain ASCII only: no spaces, control characters, quotes,
+     * '|', '<', ';' and so on, so an address is safe to show on a terminal and
+     * to write into logs (SEC-003). */
+    auto alnum = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    };
+    for (char c : local)
+        if (!alnum(c) && c != '.' && c != '_' && c != '%' && c != '+' && c != '-') return false;
+    if (local.front() == '.' || local.back() == '.' || local.find("..") != std::string::npos)
+        return false;
+
+    /* domain: two or more labels of letters, digits and inner hyphens */
+    size_t labels = 0, start = 0;
+    while (true) {
+        size_t dot = domain.find('.', start);
+        std::string label = domain.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+        if (label.empty() || label.size() > 63 || label.front() == '-' || label.back() == '-')
+            return false;
+        for (char c : label)
+            if (!alnum(c) && c != '-') return false;
+        ++labels;
+        if (dot == std::string::npos) break;
+        start = dot + 1;
+    }
+    return labels >= 2;
 }
 
 bool is_valid_password(const std::string& pw) {
