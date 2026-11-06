@@ -65,6 +65,16 @@ rrs_status_t auth_profile_get(const rrs_session_t* session, rrs_profile_t* out);
 rrs_status_t auth_profile_update(const rrs_session_t* session, const char* new_name,
                                  const char* new_email);
 
+/* SEC-006: like auth_authorize, for functions that REQUIRE this exact role.
+ * Also writes to the audit log under `function_name` (e.g. "train_create"):
+ *   a wrong role         -> ACCESS_DENIED  (user id, ERR_FORBIDDEN)
+ *   an admin call that is allowed -> ADMIN_ACTION (user id)
+ *   a dead/forged session -> SESSION_REJECTED
+ * Do not use it for "admin or passenger" functions that try one role and then
+ * the other; use auth_authorize there, which only logs rejected sessions. */
+rrs_status_t auth_authorize_for(const rrs_session_t* session, rrs_role_t required_role,
+                                const char* function_name);
+
 /* FR-006: end a session (logout). The token stops working immediately.
  *   RRS_OK                the session was live and has been removed
  *   ERR_SESSION_EXPIRED   null, unknown, tampered, already logged out, or idle-expired

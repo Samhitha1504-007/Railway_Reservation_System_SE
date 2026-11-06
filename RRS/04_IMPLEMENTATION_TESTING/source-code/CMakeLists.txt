@@ -16,6 +16,13 @@ file(GLOB_RECURSE RRS_SOURCES CONFIGURE_DEPENDS
 list(FILTER RRS_SOURCES EXCLUDE REGEX "/src/inventory/")
 list(FILTER RRS_SOURCES EXCLUDE REGEX "/src/booking/")
 
+# Audit logger (SEC-006). Public header: include/audit.h
+add_library(rrs_audit STATIC src/audit/audit.cpp)
+target_include_directories(rrs_audit
+    PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/audit"
+)
+
 # Auth module (C++17, OpenSSL for password hashing). Public header: include/auth.h
 add_library(rrs_auth STATIC
     src/auth/auth.cpp
@@ -27,7 +34,7 @@ target_include_directories(rrs_auth
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
 )
-target_link_libraries(rrs_auth PUBLIC OpenSSL::Crypto)
+target_link_libraries(rrs_auth PUBLIC OpenSSL::Crypto rrs_audit)
 
 # Search module (C++17). Public header: include/search.h
 add_library(rrs_search STATIC
@@ -112,3 +119,13 @@ add_test(NAME rrs_fare_eco_tests COMMAND rrs_fare_eco_tests)
 add_executable(rrs_search_perf_tests tests/test_search_perf.cpp)
 target_link_libraries(rrs_search_perf_tests PRIVATE rrs_search GTest::gtest_main)
 add_test(NAME rrs_search_perf_tests COMMAND rrs_search_perf_tests)
+
+# Security tests (SEC-003, SEC-004, SEC-006): every .cpp in tests/security/ is built in.
+file(GLOB RRS_SECURITY_TESTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/security/*.cpp")
+add_executable(rrs_security_tests ${RRS_SECURITY_TESTS})
+target_include_directories(rrs_security_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/audit"
+)
+target_link_libraries(rrs_security_tests PRIVATE rrs_auth GTest::gtest_main)
+add_test(NAME rrs_security_tests COMMAND rrs_security_tests)
