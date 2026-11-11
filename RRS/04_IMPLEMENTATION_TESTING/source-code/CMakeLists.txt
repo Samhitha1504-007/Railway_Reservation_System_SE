@@ -129,3 +129,12 @@ target_include_directories(rrs_security_tests PRIVATE
 )
 target_link_libraries(rrs_security_tests PRIVATE rrs_auth GTest::gtest_main)
 add_test(NAME rrs_security_tests COMMAND rrs_security_tests)
+
+# NFR-008: 500 trains and 10,000 bookings
+add_executable(rrs_scalability_tests tests/test_scalability.cpp)
+target_include_directories(rrs_scalability_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
+)
+target_link_libraries(rrs_scalability_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
+add_test(NAME rrs_scalability_tests COMMAND rrs_scalability_tests)
