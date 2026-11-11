@@ -161,7 +161,7 @@ void inventory_set_booking_counter(rrs_confirmed_count_fn counter)
 
 rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train)
 {
-    rrs_status_t st = auth_authorize(session, RRS_ROLE_ADMIN);
+    rrs_status_t st = auth_authorize_for(session, RRS_ROLE_ADMIN, "train_create");
     int pos;
     rrs_train_t* slot;
 
@@ -192,7 +192,7 @@ rrs_status_t train_create(const rrs_session_t* session, const rrs_train_t* train
 
 rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train)
 {
-    rrs_status_t st = auth_authorize(session, RRS_ROLE_ADMIN);
+    rrs_status_t st = auth_authorize_for(session, RRS_ROLE_ADMIN, "train_update");
     rrs_train_t previous;
     int pos;
 
@@ -221,7 +221,7 @@ rrs_status_t train_update(const rrs_session_t* session, const rrs_train_t* train
 
 rrs_status_t train_retire(const rrs_session_t* session, const char* train_id)
 {
-    rrs_status_t st = auth_authorize(session, RRS_ROLE_ADMIN);
+    rrs_status_t st = auth_authorize_for(session, RRS_ROLE_ADMIN, "train_retire");
     int pos;
 
     if (st != RRS_OK) return st;

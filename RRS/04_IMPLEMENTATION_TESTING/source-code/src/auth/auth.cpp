@@ -2,6 +2,7 @@
 #include "auth_internal.h"
 #include "password.h"
 #include "session.h"
+#include "audit.h"
 
 #include <openssl/rand.h>
 
@@ -57,14 +58,38 @@ std::string normalize_email(const std::string& email) {
 
 bool is_valid_email(const std::string& email) {
     if (email.empty() || email.size() > 100) return false;
-    if (email.find_first_of(" \t\r\n") != std::string::npos) return false;
+
     size_t at = email.find('@');
     if (at == std::string::npos || at == 0) return false;
     if (email.find('@', at + 1) != std::string::npos) return false;
-    std::string domain = email.substr(at + 1);
-    size_t dot = domain.find('.');
-    if (dot == std::string::npos || dot == 0 || domain.back() == '.') return false;
-    return true;
+    const std::string local = email.substr(0, at);
+    const std::string domain = email.substr(at + 1);
+
+    /* Allow-list, plain ASCII only: no spaces, control characters, quotes,
+     * '|', '<', ';' and so on, so an address is safe to show on a terminal and
+     * to write into logs (SEC-003). */
+    auto alnum = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    };
+    for (char c : local)
+        if (!alnum(c) && c != '.' && c != '_' && c != '%' && c != '+' && c != '-') return false;
+    if (local.front() == '.' || local.back() == '.' || local.find("..") != std::string::npos)
+        return false;
+
+    /* domain: two or more labels of letters, digits and inner hyphens */
+    size_t labels = 0, start = 0;
+    while (true) {
+        size_t dot = domain.find('.', start);
+        std::string label = domain.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+        if (label.empty() || label.size() > 63 || label.front() == '-' || label.back() == '-')
+            return false;
+        for (char c : label)
+            if (!alnum(c) && c != '-') return false;
+        ++labels;
+        if (dot == std::string::npos) break;
+        start = dot + 1;
+    }
+    return labels >= 2;
 }
 
 bool is_valid_password(const std::string& pw) {
@@ -134,10 +159,14 @@ extern "C" rrs_status_t auth_login(const char* email, const char* password, rrs_
         static std::string dummy;
         if (dummy.empty()) rrs::password_hash("Dummy-Password-1", dummy);
         rrs::password_verify(password, dummy);
+        audit_event("LOGIN_FAILED", email, "auth_login", ERR_AUTH_FAILED);
         return ERR_AUTH_FAILED;
     }
 
-    if (!rrs::password_verify(password, u->password_hash)) return ERR_AUTH_FAILED;
+    if (!rrs::password_verify(password, u->password_hash)) {
+        audit_event("LOGIN_FAILED", email, "auth_login", ERR_AUTH_FAILED);
+        return ERR_AUTH_FAILED;
+    }
 
     if (!rrs::session_create(u->user_id, u->role, *out)) {
         std::memset(out, 0, sizeof *out);
@@ -159,8 +188,10 @@ extern "C" rrs_status_t auth_profile_get(const rrs_session_t* session, rrs_profi
     std::memset(out, 0, sizeof *out);
 
     rrs::SessionInfo info;
-    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid)
+    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid) {
+        audit_event("SESSION_REJECTED", "unknown", "auth_profile_get", ERR_SESSION_EXPIRED);
         return ERR_SESSION_EXPIRED;
+    }
     const UserRecord* u = find_user_by_id(info.user_id);
     if (!u) return ERR_NOT_FOUND;
 
@@ -174,8 +205,10 @@ extern "C" rrs_status_t auth_profile_get(const rrs_session_t* session, rrs_profi
 extern "C" rrs_status_t auth_profile_update(const rrs_session_t* session, const char* new_name,
                                             const char* new_email) {
     rrs::SessionInfo info;
-    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid)
+    if (rrs::session_authenticate(session, info) != rrs::SessionStatus::Valid) {
+        audit_event("SESSION_REJECTED", "unknown", "auth_profile_update", ERR_SESSION_EXPIRED);
         return ERR_SESSION_EXPIRED;
+    }
     if (!new_name && !new_email) return ERR_INVALID_INPUT;
 
     UserRecord* u = find_user_by_id(info.user_id);
@@ -200,7 +233,9 @@ extern "C" rrs_status_t auth_profile_update(const rrs_session_t* session, const 
 }
 
 extern "C" rrs_status_t auth_logout(const rrs_session_t* session) {
-    return rrs::session_destroy(session) ? RRS_OK : ERR_SESSION_EXPIRED;
+    if (rrs::session_destroy(session)) return RRS_OK;
+    audit_event("SESSION_REJECTED", "unknown", "auth_logout", ERR_SESSION_EXPIRED);
+    return ERR_SESSION_EXPIRED;
 }
 
 void auth_reset_for_tests(void) {

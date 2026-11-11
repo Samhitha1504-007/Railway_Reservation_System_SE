@@ -5,7 +5,7 @@
 
 #include <string.h>
 
-#define MAX_WAITLIST_ENTRIES 4096
+#define MAX_WAITLIST_ENTRIES RRS_MAX_BOOKINGS   /* NFR-008: every booking could be waitlisted */
 
 typedef struct {
     char        train_id[RRS_TRAIN_ID_LEN];
