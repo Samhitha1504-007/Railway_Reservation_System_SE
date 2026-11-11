@@ -138,3 +138,13 @@ target_include_directories(rrs_scalability_tests PRIVATE
 )
 target_link_libraries(rrs_scalability_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
 add_test(NAME rrs_scalability_tests COMMAND rrs_scalability_tests)
+
+# Security validation pass (#36): SEC-001 to SEC-006 end to end
+add_executable(rrs_security_validation_tests tests/test_security_validation.cpp)
+target_include_directories(rrs_security_validation_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/audit"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
+)
+target_link_libraries(rrs_security_validation_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
+add_test(NAME rrs_security_validation_tests COMMAND rrs_security_validation_tests)
