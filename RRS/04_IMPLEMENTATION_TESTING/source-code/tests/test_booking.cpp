@@ -583,6 +583,101 @@ TEST_F(BookingTest, NFR009NoDoubleBookingUnder50ConcurrentRequestsForLastSeat) {
     }
 }
 
+TEST_F(BookingTest, NFR009SameSessionConcurrentBookingsNoDataRace) {
+    const int kConcurrentRequests = 8;
+    /* Create train with sufficient seats */
+    rrs_train_t t = make_train("SAMESESS1", 50, 50, 50);
+    ASSERT_EQ(train_create(&admin_session, &t), RRS_OK);
+
+    /* Use the single shared passenger_session across all 8 concurrent threads */
+    std::vector<rrs_booking_t> results(kConcurrentRequests);
+    std::vector<rrs_status_t> statuses(kConcurrentRequests);
+    std::vector<std::thread> threads;
+    threads.reserve(kConcurrentRequests);
+
+    std::atomic<bool> release_gate{false};
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        threads.emplace_back([&, i]() {
+            while (!release_gate.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            std::string key = "same-sess-key-" + std::to_string(i);
+            statuses[i] = booking_create(&passenger_session, "SAMESESS1", RRS_CLASS_SLEEPER, 350.0,
+                                         key.c_str(), &results[i]);
+        });
+    }
+
+    release_gate.store(true, std::memory_order_release);
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    std::set<std::string> pnrs;
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        ASSERT_EQ(statuses[i], RRS_OK);
+        EXPECT_EQ(results[i].status, RRS_BOOKING_CONFIRMED);
+        pnrs.insert(results[i].pnr);
+    }
+    EXPECT_EQ(pnrs.size(), static_cast<size_t>(kConcurrentRequests));
+    EXPECT_EQ(booking_count_confirmed("SAMESESS1", RRS_CLASS_SLEEPER), kConcurrentRequests);
+
+    /* Also verify concurrent reads (booking_get) with the same session */
+    std::vector<std::thread> read_threads;
+    std::vector<rrs_booking_t> read_results(kConcurrentRequests);
+    std::vector<rrs_status_t> read_statuses(kConcurrentRequests);
+    read_threads.reserve(kConcurrentRequests);
+    release_gate.store(false, std::memory_order_relaxed);
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        read_threads.emplace_back([&, i]() {
+            while (!release_gate.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            read_statuses[i] = booking_get(&passenger_session, results[i].pnr, &read_results[i]);
+        });
+    }
+
+    release_gate.store(true, std::memory_order_release);
+    for (auto& th : read_threads) {
+        th.join();
+    }
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        EXPECT_EQ(read_statuses[i], RRS_OK);
+        EXPECT_STREQ(read_results[i].pnr, results[i].pnr);
+    }
+
+    /* Also verify concurrent booking_list_by_passenger with the same session */
+    std::vector<std::thread> list_threads;
+    std::vector<rrs_status_t> list_statuses(kConcurrentRequests);
+    std::vector<int> actual_counts(kConcurrentRequests, 0);
+    list_threads.reserve(kConcurrentRequests);
+    release_gate.store(false, std::memory_order_relaxed);
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        list_threads.emplace_back([&, i]() {
+            while (!release_gate.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            rrs_booking_t user_bookings[16];
+            list_statuses[i] = booking_list_by_passenger(&passenger_session, user_bookings,
+                                                         16, &actual_counts[i]);
+        });
+    }
+
+    release_gate.store(true, std::memory_order_release);
+    for (auto& th : list_threads) {
+        th.join();
+    }
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        EXPECT_EQ(list_statuses[i], RRS_OK);
+        EXPECT_GE(actual_counts[i], kConcurrentRequests);
+    }
+}
+
 /* ========================================================================= */
 /* NFR-002: Booking confirmation time                                        */
 /* Booking confirmation completes within 1s under normal load                */

@@ -205,13 +205,14 @@ rrs_status_t booking_create(const rrs_session_t* session,
         return ERR_INVALID_INPUT;
     }
 
+    BOOKING_LOCK();
+
     /* Verify passenger role and valid session */
     auth_st = auth_authorize(session, RRS_ROLE_PASSENGER);
     if (auth_st != RRS_OK) {
+        BOOKING_UNLOCK();
         return auth_st;
     }
-
-    BOOKING_LOCK();
 
     /* Idempotency check (FR-024): avoid duplicate on retry */
     if (idempotency_key && idempotency_key[0] != '\0') {
@@ -307,15 +308,17 @@ rrs_status_t booking_get(const rrs_session_t* session,
         return ERR_INVALID_INPUT;
     }
 
+    BOOKING_LOCK();
+
     auth_pass = auth_authorize(session, RRS_ROLE_PASSENGER);
     auth_admin = auth_authorize(session, RRS_ROLE_ADMIN);
     if (auth_pass != RRS_OK && auth_admin != RRS_OK) {
+        BOOKING_UNLOCK();
         return (auth_pass == ERR_FORBIDDEN || auth_admin == ERR_FORBIDDEN)
                    ? ERR_FORBIDDEN
                    : ERR_SESSION_EXPIRED;
     }
 
-    BOOKING_LOCK();
     for (i = 0; i < g_booking_count; ++i) {
         if (strcmp(g_bookings[i].pnr, pnr) == 0) {
             if (auth_admin != RRS_OK && strcmp(session->user_id, g_bookings[i].passenger_id) != 0) {
@@ -352,12 +355,14 @@ rrs_status_t booking_list_by_passenger(const rrs_session_t* session,
         return ERR_INVALID_INPUT;
     }
 
+    BOOKING_LOCK();
+
     auth_st = auth_authorize(session, RRS_ROLE_PASSENGER);
     if (auth_st != RRS_OK) {
+        BOOKING_UNLOCK();
         return auth_st;
     }
 
-    BOOKING_LOCK();
     for (i = 0; i < g_booking_count && found < max_count; ++i) {
         if (strcmp(g_bookings[i].passenger_id, session->user_id) == 0) {
             if (g_bookings[i].status == RRS_BOOKING_WAITLISTED) {
@@ -385,15 +390,17 @@ rrs_status_t booking_cancel(const rrs_session_t* session, const char* pnr)
         return ERR_INVALID_INPUT;
     }
 
+    BOOKING_LOCK();
+
     auth_pass = auth_authorize(session, RRS_ROLE_PASSENGER);
     auth_admin = auth_authorize(session, RRS_ROLE_ADMIN);
     if (auth_pass != RRS_OK && auth_admin != RRS_OK) {
+        BOOKING_UNLOCK();
         return (auth_pass == ERR_FORBIDDEN || auth_admin == ERR_FORBIDDEN)
                    ? ERR_FORBIDDEN
                    : ERR_SESSION_EXPIRED;
     }
 
-    BOOKING_LOCK();
     for (i = 0; i < g_booking_count; ++i) {
         if (strcmp(g_bookings[i].pnr, pnr) == 0) {
             if (auth_admin != RRS_OK && strcmp(session->user_id, g_bookings[i].passenger_id) != 0) {
@@ -455,6 +462,9 @@ int booking_count_waitlisted(const char* train_id, rrs_class_t cls)
     return count;
 }
 
+/* Note: The callback executes while holding the global booking lock.
+ * Real payment gateways must return promptly and must not re-enter the
+ * booking API to prevent deadlocks or serialization bottlenecks. */
 void booking_set_payment_gateway(rrs_payment_gateway_fn fn)
 {
     BOOKING_LOCK();
