@@ -131,6 +131,9 @@ typedef int (*rrs_payment_gateway_fn)(const char* passenger_id, double amount);
 /*
  * Configure payment gateway function.
  * Pass NULL to restore default mock payment logic.
+ * Note: The callback executes while holding the global booking lock.
+ * Real payment gateways must return promptly and must not re-enter the
+ * booking API to prevent deadlocks or serialization bottlenecks.
  */
 void booking_set_payment_gateway(rrs_payment_gateway_fn fn);
 

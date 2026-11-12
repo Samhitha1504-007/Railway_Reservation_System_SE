@@ -1,8 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "auth.h"
@@ -496,6 +501,223 @@ TEST_F(BookingTest, CancelThenPromoteNeverExceedsCapacity) {
     EXPECT_EQ(waitlist_promote("CAP2T", RRS_CLASS_SLEEPER), RRS_OK);
     EXPECT_EQ(booking_count_confirmed("CAP2T", RRS_CLASS_SLEEPER), 2);
     EXPECT_EQ(booking_count_waitlisted("CAP2T", RRS_CLASS_SLEEPER), 1);
+}
+
+/* ========================================================================= */
+/* NFR-009: No double-booking under concurrency                              */
+/* Exactly one confirmed booking when 50 concurrent requests target last seat*/
+/* ========================================================================= */
+
+TEST_F(BookingTest, NFR009NoDoubleBookingUnder50ConcurrentRequestsForLastSeat) {
+    const int kConcurrentRequests = 50;
+    /* Create train with exactly 1 seat in AC2 */
+    rrs_train_t t = make_train("RACE101", 0, 0, 1);
+    ASSERT_EQ(train_create(&admin_session, &t), RRS_OK);
+
+    /* Register and log in 50 distinct passenger sessions */
+    std::vector<rrs_session_t> sessions(kConcurrentRequests);
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        std::string email = "user" + std::to_string(i) + "@race.test";
+        std::string name = "RaceUser" + std::to_string(i);
+        ASSERT_EQ(auth_register(email.c_str(), "Pass1234!", name.c_str()), RRS_OK);
+        ASSERT_EQ(auth_login(email.c_str(), "Pass1234!", &sessions[i]), RRS_OK);
+    }
+
+    std::vector<rrs_booking_t> results(kConcurrentRequests);
+    std::vector<rrs_status_t> statuses(kConcurrentRequests);
+    std::vector<std::thread> threads;
+    threads.reserve(kConcurrentRequests);
+
+    std::atomic<bool> release_gate{false};
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        threads.emplace_back([&, i]() {
+            while (!release_gate.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            std::string key = "race-key-" + std::to_string(i);
+            statuses[i] = booking_create(&sessions[i], "RACE101", RRS_CLASS_AC2, 950.0,
+                                         key.c_str(), &results[i]);
+        });
+    }
+
+    /* Release all 50 threads simultaneously to contend for the last seat */
+    release_gate.store(true, std::memory_order_release);
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    int confirmed_count = 0;
+    int waitlisted_count = 0;
+    std::set<std::string> pnrs;
+    std::vector<int> waitlist_positions;
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        ASSERT_EQ(statuses[i], RRS_OK);
+        pnrs.insert(results[i].pnr);
+
+        if (results[i].status == RRS_BOOKING_CONFIRMED) {
+            confirmed_count++;
+            EXPECT_EQ(results[i].waitlist_position, 0);
+        } else if (results[i].status == RRS_BOOKING_WAITLISTED) {
+            waitlisted_count++;
+            EXPECT_GT(results[i].waitlist_position, 0);
+            waitlist_positions.push_back(results[i].waitlist_position);
+        }
+    }
+
+    /* Exactly 1 confirmed booking, 49 waitlisted */
+    EXPECT_EQ(confirmed_count, 1);
+    EXPECT_EQ(waitlisted_count, 49);
+    EXPECT_EQ(pnrs.size(), static_cast<size_t>(kConcurrentRequests));
+
+    /* Inventory and waitlist counters agree */
+    EXPECT_EQ(booking_count_confirmed("RACE101", RRS_CLASS_AC2), 1);
+    EXPECT_EQ(booking_count_waitlisted("RACE101", RRS_CLASS_AC2), 49);
+
+    /* Waitlist positions must cover 1 through 49 with no duplicates */
+    std::sort(waitlist_positions.begin(), waitlist_positions.end());
+    for (int i = 0; i < 49; ++i) {
+        EXPECT_EQ(waitlist_positions[i], i + 1);
+    }
+}
+
+TEST_F(BookingTest, NFR009SameSessionConcurrentBookingsNoDataRace) {
+    const int kConcurrentRequests = 8;
+    /* Create train with sufficient seats */
+    rrs_train_t t = make_train("SAMESESS1", 50, 50, 50);
+    ASSERT_EQ(train_create(&admin_session, &t), RRS_OK);
+
+    /* Use the single shared passenger_session across all 8 concurrent threads */
+    std::vector<rrs_booking_t> results(kConcurrentRequests);
+    std::vector<rrs_status_t> statuses(kConcurrentRequests);
+    std::vector<std::thread> threads;
+    threads.reserve(kConcurrentRequests);
+
+    std::atomic<bool> release_gate{false};
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        threads.emplace_back([&, i]() {
+            while (!release_gate.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            std::string key = "same-sess-key-" + std::to_string(i);
+            statuses[i] = booking_create(&passenger_session, "SAMESESS1", RRS_CLASS_SLEEPER, 350.0,
+                                         key.c_str(), &results[i]);
+        });
+    }
+
+    release_gate.store(true, std::memory_order_release);
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    std::set<std::string> pnrs;
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        ASSERT_EQ(statuses[i], RRS_OK);
+        EXPECT_EQ(results[i].status, RRS_BOOKING_CONFIRMED);
+        pnrs.insert(results[i].pnr);
+    }
+    EXPECT_EQ(pnrs.size(), static_cast<size_t>(kConcurrentRequests));
+    EXPECT_EQ(booking_count_confirmed("SAMESESS1", RRS_CLASS_SLEEPER), kConcurrentRequests);
+
+    /* Also verify concurrent reads (booking_get) with the same session */
+    std::vector<std::thread> read_threads;
+    std::vector<rrs_booking_t> read_results(kConcurrentRequests);
+    std::vector<rrs_status_t> read_statuses(kConcurrentRequests);
+    read_threads.reserve(kConcurrentRequests);
+    release_gate.store(false, std::memory_order_relaxed);
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        read_threads.emplace_back([&, i]() {
+            while (!release_gate.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            read_statuses[i] = booking_get(&passenger_session, results[i].pnr, &read_results[i]);
+        });
+    }
+
+    release_gate.store(true, std::memory_order_release);
+    for (auto& th : read_threads) {
+        th.join();
+    }
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        EXPECT_EQ(read_statuses[i], RRS_OK);
+        EXPECT_STREQ(read_results[i].pnr, results[i].pnr);
+    }
+
+    /* Also verify concurrent booking_list_by_passenger with the same session */
+    std::vector<std::thread> list_threads;
+    std::vector<rrs_status_t> list_statuses(kConcurrentRequests);
+    std::vector<int> actual_counts(kConcurrentRequests, 0);
+    list_threads.reserve(kConcurrentRequests);
+    release_gate.store(false, std::memory_order_relaxed);
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        list_threads.emplace_back([&, i]() {
+            while (!release_gate.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            rrs_booking_t user_bookings[16];
+            list_statuses[i] = booking_list_by_passenger(&passenger_session, user_bookings,
+                                                         16, &actual_counts[i]);
+        });
+    }
+
+    release_gate.store(true, std::memory_order_release);
+    for (auto& th : list_threads) {
+        th.join();
+    }
+
+    for (int i = 0; i < kConcurrentRequests; ++i) {
+        EXPECT_EQ(list_statuses[i], RRS_OK);
+        EXPECT_GE(actual_counts[i], kConcurrentRequests);
+    }
+}
+
+/* ========================================================================= */
+/* NFR-002: Booking confirmation time                                        */
+/* Booking confirmation completes within 1s under normal load                */
+/* ========================================================================= */
+
+TEST_F(BookingTest, NFR002BookingConfirmationTimeUnderNormalLoadMeets1sLimit) {
+    const int kIterations = 100;
+    /* Train with ample capacity for 100 bookings */
+    rrs_train_t t = make_train("PERF101", 150, 100, 50);
+    ASSERT_EQ(train_create(&admin_session, &t), RRS_OK);
+
+    std::vector<double> latencies_ms;
+    latencies_ms.reserve(kIterations);
+
+    for (int i = 0; i < kIterations; ++i) {
+        rrs_booking_t b;
+        std::string key = "perf-key-" + std::to_string(i);
+
+        auto start = std::chrono::steady_clock::now();
+        rrs_status_t st = booking_create(&passenger_session, "PERF101", RRS_CLASS_SLEEPER,
+                                         350.0, key.c_str(), &b);
+        auto elapsed = std::chrono::steady_clock::now() - start;
+
+        ASSERT_EQ(st, RRS_OK);
+        EXPECT_EQ(b.status, RRS_BOOKING_CONFIRMED);
+
+        double ms = std::chrono::duration<double, std::milli>(elapsed).count();
+        latencies_ms.push_back(ms);
+    }
+
+    std::sort(latencies_ms.begin(), latencies_ms.end());
+    double p95 = latencies_ms[static_cast<size_t>(0.95 * (latencies_ms.size() - 1))];
+    double max_lat = latencies_ms.back();
+
+    std::printf("  booking confirmation: p95 %.3f ms, max %.3f ms (limit 1000.0 ms)\n",
+                p95, max_lat);
+
+    /* NFR-002 requires completion within 1 second (1000.0 ms) */
+    EXPECT_LT(p95, 1000.0);
+    EXPECT_LT(max_lat, 1000.0);
 }
 
 } // namespace
