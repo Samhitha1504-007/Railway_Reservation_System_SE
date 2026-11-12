@@ -90,7 +90,7 @@ rrs_status_t facade_search(const rrs_session_t* session, const char* from, const
     rrs_status_t st;
 
     if (out) {
-        memset(out, 0, sizeof *out);
+        *out = rrs_option_list_t();
     }
     if (!session) {
         return ERR_SESSION_EXPIRED;

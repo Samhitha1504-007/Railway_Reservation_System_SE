@@ -304,7 +304,7 @@ static void results(app_t* app, const rrs_option_list_t* list, rrs_class_t cls,
                     rrs_concession_t conc)
 {
     char lines[RRS_MAX_ROUTES][110];
-    const char* ptrs[RRS_MAX_ROUTES];
+    const char* ptrs[RRS_MAX_ROUTES] = { NULL };
     int i, pick;
 
     screen("Results", "Enter selects a journey, Esc goes back");
@@ -405,7 +405,7 @@ static void my_bookings(app_t* app)
 {
     rrs_booking_t all[64];
     char lines[64][100];
-    const char* ptrs[64];
+    const char* ptrs[64] = { NULL };
     int n = 0, i, pick;
     rrs_status_t st;
 
