@@ -148,3 +148,13 @@ target_include_directories(rrs_security_validation_tests PRIVATE
 )
 target_link_libraries(rrs_security_validation_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
 add_test(NAME rrs_security_validation_tests COMMAND rrs_security_validation_tests)
+
+# NFR-003: availability soak run (#38)
+add_executable(rrs_availability_tests tests/test_availability.cpp)
+target_include_directories(rrs_availability_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/booking"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
+)
+target_link_libraries(rrs_availability_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
+add_test(NAME rrs_availability_tests COMMAND rrs_availability_tests)
