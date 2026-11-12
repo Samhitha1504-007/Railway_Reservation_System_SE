@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="22" failures="0" disabled="0" errors="0" time="0." timestamp="2026-11-12T05:34:26.868" name="AllTests">
+  <testsuite name="FareTest" tests="8" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-11-12T05:34:26.868">
+    <testcase name="DirectSleeperNoConcessionMatchesHandComputedFare" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="34" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+    <testcase name="SeniorConcessionDiscountsTheDistanceCharge" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="38" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+    <testcase name="OtherConcessions" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="42" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+    <testcase name="ClassChangesTheRate" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="47" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+    <testcase name="EachLegOfAConnectionIsASeparateTicket" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="52" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+    <testcase name="RoundedToTheNearestRupee" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="56" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+    <testcase name="LongerTripCostsMore" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="60" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+    <testcase name="InvalidInputIsRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="64" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="FareTest" />
+  </testsuite>
+  <testsuite name="EcoTest" tests="4" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-11-12T05:34:26.868">
+    <testcase name="Co2AndScoreForADirectSleeperTrip" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="80" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="EcoTest" />
+    <testcase name="AcClassesEmitMorePerPassenger" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="89" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="EcoTest" />
+    <testcase name="EachChangeOfTrainAddsAPenalty" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="101" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="EcoTest" />
+    <testcase name="InvalidInputIsRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="110" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="EcoTest" />
+  </testsuite>
+  <testsuite name="RankTest" tests="9" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-11-12T05:34:26.868">
+    <testcase name="SortByTimeFareAndEco" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="145" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="EachOptionCarriesItsFareAndEcoScore" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="154" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="ConcessionIsReflectedInRankedFares" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="162" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="Filters" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="168" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="FilterThatMatchesNothingGivesAnEmptyResult" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="190" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="TiesKeepTheSearchOrder" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="197" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="RankingDoesNotChangeTheInput" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="204" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="FilterValuesOutsideTheirRangeAreRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="210" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+    <testcase name="InvalidInputIsRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="231" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankTest" />
+  </testsuite>
+  <testsuite name="RankIntegrationTest" tests="1" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-11-12T05:34:26.868">
+    <testcase name="RanksTheResultOfARealSearch" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_fare_eco.cpp" line="247" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:26.868" classname="RankIntegrationTest" />
+  </testsuite>
+</testsuites>

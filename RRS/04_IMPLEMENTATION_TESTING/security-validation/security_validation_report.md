@@ -3,7 +3,8 @@
 **Issue:** #36 Security validation pass  
 **Run on:** 11 Nov 2026, Ubuntu (WSL / GitHub Actions `ubuntu-latest`), CMake Debug build  
 **Scope:** SRS §6.3 security requirements, executed as described in Test Plan §5  
-**Result:** all six requirements **pass** after two fixes made in this pass (see *Findings fixed*).
+**Result:** all six requirements **pass** after two fixes made in this pass (see *Findings fixed*).  
+**Re-checked:** 12 Nov 2026 on `main` after PRs #70 to #77: all 9 tests here and all 43 in `rrs_security_tests` still pass, and open findings 1, 2 and 6 are now fixed (see below).
 
 ## How to re-run
 
@@ -31,13 +32,14 @@ ctest --test-dir build                  # everything, as CI runs it
 1. **SEC-006: admin actions were not audited.** Inventory's `train_create`, `train_update` and `train_retire` called `auth_authorize`, which does not log. An admin creating a train added 0 audit entries, and a passenger's denied attempt was not logged either. **Fix:** they now call `auth_authorize_for(session, RRS_ROLE_ADMIN, "<function>")`, as recommended in #71. Before the fix, `Sec006FailedLoginsAndAdminActionsAreAudited` fails.
 2. **NFR-008 (found during this pass): the waitlist was capped at 4,096 entries.** Booking #4,097 onward on a full class failed with `ERR_CAPACITY_CONFLICT`, although NFR-008 requires 10,000 bookings. **Fix:** `MAX_WAITLIST_ENTRIES` is now `RRS_MAX_BOOKINGS` (10,000). Covered by `rrs_scalability_tests`.
 
-## Open findings (not blocking this pass)
+## Findings found later or left open
 
-| # | Finding | Requirement | Owner / where |
-|---|---|---|---|
-| 1 | The fare is supplied by the caller of `booking_create`; the facade/TUI must pass `fare_calculate()`'s value, never user input | SEC-003 | Facade / TUI (#35) |
-| 2 | Booking functions call `auth_authorize` outside the booking lock, a data race under concurrent use of one session (found with ThreadSanitizer) | NFR-009 | #70 (changes requested) |
-| 3 | A passenger trying to read or cancel someone else's booking gets `ERR_FORBIDDEN` but is not written to the audit log | SEC-006 | Booking (after #70 lands) |
-| 4 | `ADMIN_ACTION` is logged when the role check passes, before the action runs, so it records authorized attempts, not completed actions | SEC-006 | Audit (#71 follow-up) |
-| 5 | Nothing is stored on disk yet (`persistence/store.c` is empty), so SEC-001 and SEC-005 were verified on the in-memory records; re-check the saved files once persistence lands | SEC-001, SEC-005 | Persistence |
-| 6 | The facade/TUI must call `audit_init("data/audit.log")` and `booking_init()` at startup; until then audit entries stay in memory only | SEC-006 | Facade / TUI (#35) |
+| # | Finding | Requirement | Owner / where | Status (12 Nov) |
+|---|---|---|---|---|
+| 1 | The fare is supplied by the caller of `booking_create`; the facade/TUI must pass `fare_calculate()`'s value, never user input | SEC-003 | Facade / TUI (#35) | **Fixed in #77:** `facade_book` computes each leg's fare with `fare_calculate()`; covered by `FacadeTest.FareComesFromFareCalculateNotFromTheCaller` |
+| 2 | Booking functions call `auth_authorize` outside the booking lock, a data race under concurrent use of one session (found with ThreadSanitizer) | NFR-009 | #70 | **Fixed in #70:** the lock is taken before `auth_authorize`; ThreadSanitizer is clean with 8 threads on one session; covered by `BookingTest.NFR009SameSessionConcurrentBookingsNoDataRace` |
+| 3 | A passenger trying to read or cancel someone else's booking gets `ERR_FORBIDDEN` but is not written to the audit log | SEC-006 | Booking | Open |
+| 4 | `ADMIN_ACTION` is logged when the role check passes, before the action runs, so it records authorized attempts, not completed actions | SEC-006 | Audit (#71 follow-up) | Open |
+| 5 | Nothing is stored on disk yet (`persistence/store.c` is empty), so SEC-001 and SEC-005 were verified on the in-memory records; re-check the saved files once persistence lands | SEC-001, SEC-005 | Persistence | Open (persistence still not implemented) |
+| 6 | The facade/TUI must call `audit_init("data/audit.log")` and `booking_init()` at startup; until then audit entries stay in memory only | SEC-006 | Facade / TUI (#35) | **Fixed in #77:** `main()` calls `facade_init("data/audit.log")`, which calls `audit_init` and `booking_init`; the TUI run on 12 Nov wrote `data/audit.log` |
+| 7 | The program creates a demo admin (`admin@rrs.in`) with a fixed password at start-up so the admin screens can be shown | SEC-001, SEC-002 | Facade (#77) | Open: acceptable for the demo only; remove or read from configuration before any real use |

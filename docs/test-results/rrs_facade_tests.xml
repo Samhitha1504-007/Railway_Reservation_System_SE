@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="6" failures="0" disabled="0" errors="0" time="0.821" timestamp="2026-11-12T05:34:26.042" name="AllTests">
+  <testsuite name="FacadeTest" tests="6" failures="0" disabled="0" skipped="0" errors="0" time="0.821" timestamp="2026-11-12T05:34:26.043">
+    <testcase name="SearchBookAndCancelEndToEnd" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_facade.cpp" line="33" status="run" result="completed" time="0.162" timestamp="2026-11-12T05:34:26.043" classname="FacadeTest" />
+    <testcase name="FareComesFromFareCalculateNotFromTheCaller" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_facade.cpp" line="53" status="run" result="completed" time="0.128" timestamp="2026-11-12T05:34:26.205" classname="FacadeTest" />
+    <testcase name="RetryWithSameKeyDoesNotDuplicate" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_facade.cpp" line="65" status="run" result="completed" time="0.15" timestamp="2026-11-12T05:34:26.333" classname="FacadeTest" />
+    <testcase name="MultiLegBookingIsRolledBackWhenALaterLegFails" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_facade.cpp" line="82" status="run" result="completed" time="0.142" timestamp="2026-11-12T05:34:26.483" classname="FacadeTest" />
+    <testcase name="FailedPaymentBooksNothing" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_facade.cpp" line="100" status="run" result="completed" time="0.114" timestamp="2026-11-12T05:34:26.626" classname="FacadeTest" />
+    <testcase name="RejectsMissingOrBadSessionAndInput" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_facade.cpp" line="112" status="run" result="completed" time="0.123" timestamp="2026-11-12T05:34:26.741" classname="FacadeTest" />
+  </testsuite>
+</testsuites>
