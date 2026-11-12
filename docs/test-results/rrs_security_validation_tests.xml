@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="9" failures="0" disabled="0" errors="0" time="1.833" timestamp="2026-11-12T05:34:58.555" name="AllTests">
+  <testsuite name="SecurityValidation" tests="9" failures="0" disabled="0" skipped="0" errors="0" time="1.833" timestamp="2026-11-12T05:34:58.555">
+    <testcase name="Sec001PasswordsAreStoredAsSaltedHashesOnly" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="86" status="run" result="completed" time="0.176" timestamp="2026-11-12T05:34:58.555" classname="SecurityValidation" />
+    <testcase name="Sec002PassengerCannotCallAdminFunctions" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="96" status="run" result="completed" time="0.172" timestamp="2026-11-12T05:34:58.731" classname="SecurityValidation" />
+    <testcase name="Sec002PassengerCannotReadOrCancelAnotherPassengersBooking" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="106" status="run" result="completed" time="0.178" timestamp="2026-11-12T05:34:58.904" classname="SecurityValidation" />
+    <testcase name="Sec003SearchRejectsMalformedInput" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="118" status="run" result="completed" time="0.184" timestamp="2026-11-12T05:34:59.083" classname="SecurityValidation" />
+    <testcase name="Sec003BookingRejectsMalformedInput" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="137" status="run" result="completed" time="0.181" timestamp="2026-11-12T05:34:59.267" classname="SecurityValidation" />
+    <testcase name="Sec003AdminTrainInputIsValidated" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="153" status="run" result="completed" time="0.183" timestamp="2026-11-12T05:34:59.448" classname="SecurityValidation" />
+    <testcase name="Sec004ExpiredAndInvalidTokensAreRejectedEverywhere" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="170" status="run" result="completed" time="0.278" timestamp="2026-11-12T05:34:59.632" classname="SecurityValidation" />
+    <testcase name="Sec005OnlyAPaymentFlagIsKept" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="200" status="run" result="completed" time="0.176" timestamp="2026-11-12T05:34:59.910" classname="SecurityValidation" />
+    <testcase name="Sec006FailedLoginsAndAdminActionsAreAudited" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_security_validation.cpp" line="217" status="run" result="completed" time="0.301" timestamp="2026-11-12T05:35:00.087" classname="SecurityValidation" />
+  </testsuite>
+</testsuites>

@@ -6,6 +6,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Line and branch coverage (gcov): cmake -DRRS_COVERAGE=ON, then run the tests
+# and gcovr; tools/coverage.sh does all of it (reports in docs/coverage).
+option(RRS_COVERAGE "Build with gcov coverage instrumentation" OFF)
+if(RRS_COVERAGE)
+    add_compile_options(--coverage -fprofile-update=atomic -O0 -g)
+    add_link_options(--coverage)
+endif()
+
 find_package(Curses REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)

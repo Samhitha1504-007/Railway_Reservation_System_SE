@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="2" failures="0" disabled="0" errors="0" time="10.95" timestamp="2026-11-12T05:34:39.609" name="AllTests">
+  <testsuite name="SearchPerformanceTest" tests="2" failures="0" disabled="0" skipped="0" errors="0" time="10.95" timestamp="2026-11-12T05:34:39.609">
+    <testcase name="DefaultSearchMeetsNfr001" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search_perf.cpp" line="81" status="run" result="completed" time="2.459" timestamp="2026-11-12T05:34:39.609" classname="SearchPerformanceTest" />
+    <testcase name="ThreeTrainSearchMeetsNfr001" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search_perf.cpp" line="91" status="run" result="completed" time="8.491" timestamp="2026-11-12T05:34:42.069" classname="SearchPerformanceTest" />
+  </testsuite>
+</testsuites>

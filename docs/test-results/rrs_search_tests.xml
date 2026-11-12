@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="29" failures="0" disabled="0" errors="0" time="0.001" timestamp="2026-11-12T05:34:50.565" name="AllTests">
+  <testsuite name="SearchTest" tests="16" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-11-12T05:34:50.565">
+    <testcase name="AddValidTrainSucceeds" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="42" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="DuplicateTrainIdIsRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="47" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="InvalidTrainsAreRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="52" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="TimesAndDistancesHaveUpperBounds" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="67" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="HugeTimeCannotOverflowTheSearch" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="76" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="FirstAndLastHaltMustNotDwell" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="82" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="StationCodeWithoutTerminatorIsRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="88" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="RejectedTrainIsNotLoaded" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="95" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="DirectSearchReturnsAllMatchingTrainsRanked" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="159" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="DirectLegUsesIntermediateHaltsAndDistance" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="172" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="TrainGoingTheOtherWayIsNotReturned" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="188" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="OvernightTrainIsReportedOnTheTravelDate" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="194" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="MaxResultsTruncatesToTheBest" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="205" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="DisconnectedStationsGiveNoRoute" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="219" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.565" classname="SearchTest" />
+    <testcase name="SameTrainsConnectingAtTwoStationsAreListedOnce" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="296" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchTest" />
+    <testcase name="JourneyNeverUsesTheSameTrainTwice" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="322" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchTest" />
+  </testsuite>
+  <testsuite name="SearchInputTest" tests="6" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-11-12T05:34:50.566">
+    <testcase name="UnknownStationIsInvalidInput" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="111" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchInputTest" />
+    <testcase name="NullArgumentsAreRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="116" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchInputTest" />
+    <testcase name="SameOriginAndDestinationIsRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="123" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchInputTest" />
+    <testcase name="MalformedStationCodesAreRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="127" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchInputTest" />
+    <testcase name="Dates" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="133" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchInputTest" />
+    <testcase name="OutOfRangeOptionsAreRejected" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="142" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="SearchInputTest" />
+  </testsuite>
+  <testsuite name="ConnectionTest" tests="7" failures="0" disabled="0" skipped="0" errors="0" time="0." timestamp="2026-11-12T05:34:50.566">
+    <testcase name="MultiLegRouteViaBIsReturnedWhenNoDirectTrain" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="237" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="ConnectionTest" />
+    <testcase name="MaxLegsOneMeansDirectOnly" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="252" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="ConnectionTest" />
+    <testcase name="TooShortTransferWaitsForTheNextDaysRun" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="258" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="ConnectionTest" />
+    <testcase name="ConnectionIsDroppedWhenADirectTrainIsFaster" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="268" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="ConnectionTest" />
+    <testcase name="FasterConnectionIsListedBeforeASlowDirectTrain" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="275" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="ConnectionTest" />
+    <testcase name="ThreeLegJourneyNeedsMaxLegsThree" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="283" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="ConnectionTest" />
+    <testcase name="ChangeAtExactlyTheMinimumTransferTimeIsAllowed" file="RRS/04_IMPLEMENTATION_TESTING/source-code/tests/test_search.cpp" line="309" status="run" result="completed" time="0." timestamp="2026-11-12T05:34:50.566" classname="ConnectionTest" />
+  </testsuite>
+</testsuites>
