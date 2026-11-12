@@ -73,12 +73,20 @@ target_include_directories(rrs_booking
 )
 target_link_libraries(rrs_booking PUBLIC rrs_inventory rrs_auth Threads::Threads)
 
+# Facade between the TUI and the modules. Public header: include/facade.h
+add_library(rrs_facade STATIC src/facade/facade.cpp)
+target_include_directories(rrs_facade
+    PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+)
+target_link_libraries(rrs_facade PUBLIC rrs_booking rrs_inventory rrs_search PRIVATE rrs_auth rrs_audit)
+
 add_executable(rrs_app ${RRS_SOURCES})
 target_include_directories(rrs_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     ${CURSES_INCLUDE_DIRS}
 )
-target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_auth rrs_search rrs_inventory rrs_booking)
+target_link_libraries(rrs_app PRIVATE ${CURSES_LIBRARIES} rrs_facade rrs_auth rrs_search rrs_inventory rrs_booking)
 
 enable_testing()
 find_package(GTest REQUIRED)
@@ -159,3 +167,13 @@ target_include_directories(rrs_payment_retry_tests PRIVATE
 )
 target_link_libraries(rrs_payment_retry_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
 add_test(NAME rrs_payment_retry_tests COMMAND rrs_payment_retry_tests)
+
+# Facade tests: search to booking to cancel through the one API the TUI uses
+add_executable(rrs_facade_tests tests/test_facade.cpp)
+target_include_directories(rrs_facade_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/booking"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
+)
+target_link_libraries(rrs_facade_tests PRIVATE rrs_facade rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
+add_test(NAME rrs_facade_tests COMMAND rrs_facade_tests)

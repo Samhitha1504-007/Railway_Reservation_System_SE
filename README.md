@@ -50,6 +50,6 @@ The code lives in `RRS/04_IMPLEMENTATION_TESTING/source-code/` and is built with
     cmake --build build --parallel
     ```
 4.  Run all unit tests: `ctest --test-dir build --output-on-failure`
-5.  Launch the terminal interface: `./build/rrs_app`
+5.  Launch the terminal interface: `./build/rrs_app` Log in as a passenger after registering, or as the demo admin `admin@rrs.in` (password `Adm1nPassw0rd`). Passenger flow: Search, Results, Confirm and pay, Ticket.
 
 Every module has its own test binary (`rrs_*_tests`, plus `rrs_tests`) in `build/`; any one can be run directly. The `build/` directory is ignored by git.
