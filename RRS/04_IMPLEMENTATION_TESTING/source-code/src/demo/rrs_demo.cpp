@@ -5,6 +5,7 @@
  */
 #include "auth.h"
 #include "auth_internal.h"
+#include "booking.h"
 #include "fare_eco.h"
 #include "inventory.h"
 #include "search.h"
@@ -21,10 +22,12 @@ const char* status_name(rrs_status_t st) {
         case RRS_OK:                return "OK";
         case ERR_INVALID_INPUT:     return "rejected (invalid input)";
         case ERR_AUTH_FAILED:       return "rejected (wrong email or password)";
-        case ERR_FORBIDDEN:         return "forbidden (admin only)";
+        case ERR_FORBIDDEN:         return "forbidden (not allowed)";
         case ERR_SESSION_EXPIRED:   return "rejected (not logged in)";
         case ERR_DUPLICATE:         return "rejected (already exists)";
         case ERR_NO_ROUTE:          return "no route";
+        case ERR_PAYMENT_FAILED:    return "rejected (payment failed)";
+        case ERR_NOT_FOUND:         return "not found";
         default:                    return "error";
     }
 }
@@ -163,6 +166,34 @@ int main() {
            RRS_SORT_FARE, RRS_CONCESSION_SENIOR);
     search("SBC", "NDLS", "Greenest first: lowest CO2 per passenger, compared with driving.",
            RRS_SORT_ECO);
+
+    heading("Book tickets", "Riya books AC 3-Tier on 22691; a retry with the same key returns the same PNR; a failed payment books nothing.");
+    booking_init();
+    rrs_booking_t b1, b1_retry, bad_pay;
+    step("riya books 22691 AC3 (key k-1)", booking_create(&passenger, "22691", RRS_CLASS_AC3, 2100.0, "k-1", &b1));
+    std::printf("  %-40s %s (%s)\n", "  PNR / status", b1.pnr, b1.status == RRS_BOOKING_CONFIRMED ? "CONFIRMED" : "WAITLISTED");
+    step("retry with the same key k-1", booking_create(&passenger, "22691", RRS_CLASS_AC3, 2100.0, "k-1", &b1_retry));
+    std::printf("  %-40s %s\n", "  same PNR returned", std::strcmp(b1.pnr, b1_retry.pnr) == 0 ? "yes, no duplicate" : "NO");
+    booking_set_mock_payment_result(0);
+    step("booking with a failed payment", booking_create(&passenger, "22691", RRS_CLASS_AC3, 2100.0, "k-2", &bad_pay));
+    booking_set_mock_payment_result(-1);
+
+    heading("Waitlist and auto-promotion", "Train 12951 has one AC3 seat. Riya takes it, Arjun is waitlisted; when Riya cancels, Arjun is promoted.");
+    rrs_train_t t5 = train("12951", {halt("SBC", hm(8, 0), hm(8, 0), 0), halt("MAS", hm(14, 0), hm(14, 0), 360)}, 0, 1, 0);
+    step("admin adds 12951 (1 AC3 seat)", train_create(&admin, &t5));
+    auth_register("arjun@example.com", "Passw0rdOK", "Arjun");
+    rrs_session_t arjun;
+    auth_login("arjun@example.com", "Passw0rdOK", &arjun);
+    rrs_booking_t rb, ab, ab2;
+    step("riya books the only seat", booking_create(&passenger, "12951", RRS_CLASS_AC3, 900.0, "r-1", &rb));
+    step("arjun books the same train", booking_create(&arjun, "12951", RRS_CLASS_AC3, 900.0, "a-1", &ab));
+    std::printf("  %-40s %s, position %d\n", "  arjun's status",
+                ab.status == RRS_BOOKING_WAITLISTED ? "WAITLISTED" : "CONFIRMED", ab.waitlist_position);
+    step("riya cancels her ticket", booking_cancel(&passenger, rb.pnr));
+    booking_get(&arjun, ab.pnr, &ab2);
+    std::printf("  %-40s %s\n", "  arjun's status now",
+                ab2.status == RRS_BOOKING_CONFIRMED ? "CONFIRMED (auto-promoted)" : "still waitlisted");
+    step("arjun tries to cancel riya's old PNR", booking_cancel(&arjun, rb.pnr));
 
     heading("Admin retires 12627", "The admin takes train 12627 out of service.");
     step("retire 12627", train_retire(&admin, "12627"));
