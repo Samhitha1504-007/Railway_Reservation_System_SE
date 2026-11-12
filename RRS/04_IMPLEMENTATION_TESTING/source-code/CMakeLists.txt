@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Curses REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(Threads REQUIRED)
 
 file(GLOB_RECURSE RRS_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
@@ -59,7 +60,7 @@ target_link_libraries(rrs_inventory PUBLIC rrs_search PRIVATE rrs_auth)
 # Console walkthrough of the Sprint 1 features (no TUI needed).
 add_executable(rrs_demo src/demo/rrs_demo.cpp)
 target_include_directories(rrs_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/auth")
-target_link_libraries(rrs_demo PRIVATE rrs_auth rrs_inventory rrs_search)
+target_link_libraries(rrs_demo PRIVATE rrs_auth rrs_inventory rrs_search rrs_booking)
 
 # Booking module (C11). Public header: include/booking.h
 add_library(rrs_booking STATIC
@@ -70,7 +71,7 @@ target_include_directories(rrs_booking
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/booking"
 )
-target_link_libraries(rrs_booking PUBLIC rrs_inventory rrs_auth)
+target_link_libraries(rrs_booking PUBLIC rrs_inventory rrs_auth Threads::Threads)
 
 add_executable(rrs_app ${RRS_SOURCES})
 target_include_directories(rrs_app PRIVATE
@@ -89,7 +90,7 @@ target_include_directories(rrs_booking_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
 )
-target_link_libraries(rrs_booking_tests PRIVATE rrs_booking rrs_inventory rrs_auth GTest::gtest_main)
+target_link_libraries(rrs_booking_tests PRIVATE rrs_booking rrs_inventory rrs_auth Threads::Threads GTest::gtest_main)
 add_test(NAME rrs_booking_tests COMMAND rrs_booking_tests)
 
 add_executable(rrs_inventory_tests tests/test_inventory.cpp)
@@ -158,3 +159,13 @@ target_include_directories(rrs_availability_tests PRIVATE
 )
 target_link_libraries(rrs_availability_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
 add_test(NAME rrs_availability_tests COMMAND rrs_availability_tests)
+
+# NFR-005: a payment-timeout retry never creates a second booking (#40)
+add_executable(rrs_payment_retry_tests tests/test_payment_retry.cpp)
+target_include_directories(rrs_payment_retry_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/auth"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/booking"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/inventory"
+)
+target_link_libraries(rrs_payment_retry_tests PRIVATE rrs_booking rrs_inventory rrs_search rrs_auth GTest::gtest_main)
+add_test(NAME rrs_payment_retry_tests COMMAND rrs_payment_retry_tests)
